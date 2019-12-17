@@ -1,0 +1,2 @@
+include ':flic2lib-android'
+rootProject.name='Flic2Android'
