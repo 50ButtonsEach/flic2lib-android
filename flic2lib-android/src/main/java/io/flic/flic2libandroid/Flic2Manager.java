@@ -283,7 +283,6 @@ public class Flic2Manager {
     private int currentScanCount;
     private Flic2ScanCallback currentFlic2ScanCallback;
     private HashSet<String> alreadyPairedButtonsFoundDuringScan = new HashSet<>();
-    private final LinkedList<Runnable> startScanRunnables = new LinkedList<>();
     private Runnable stopScanRunnable;
     private Runnable stopConnectAttemptRunnable;
     private Runnable stopVerifyAttemptRunnable;
@@ -393,24 +392,34 @@ public class Flic2Manager {
     };
 
     /**
-     * Converts a scan error code to a string representation.
+     * Converts an error code to a string representation.
+     *
+     * <p>This is either a result code passed to the scan callback {@link Flic2ScanCallback#onComplete(int, int, Flic2Button)}
+     * or a failure code passed to the callback {@link Flic2ButtonListener#onFailure(Flic2Button, int, int)}.</p>
      *
      * @param code an error code
-     * @return the string
+     * @return a non-null string
      */
-    public static String scanErrorCodeToString(int code) {
-        Field[] fields = Flic2ScanCallback.class.getDeclaredFields();
-        for (Field f : fields) {
+    public static String errorCodeToString(int code) {
+        for (Field field : Flic2ScanCallback.class.getDeclaredFields()) {
             try {
-                if (f.getInt(null) == code) {
-                    return f.getName();
+                if (field.getType() == int.class && field.getInt(null) == code) {
+                    return field.getName();
                 }
             } catch (IllegalAccessException e) {
-                e.printStackTrace();
             }
         }
-        return null;
+        for (Field field : Flic2ButtonListener.class.getDeclaredFields()) {
+            try {
+                if (field.getType() == int.class && field.getInt(null) == code) {
+                    return field.getName();
+                }
+            } catch (IllegalAccessException e) {
+            }
+        }
+        return "UNKNOWN (" + code + ")";
     }
+
     private Flic2ScanCallback cleanupScan() {
         //Log.d(TAG, "Cleaning up scan, " + currentFlic2ScanCallback + ", " + stopScanRunnable);
         Flic2ScanCallback cb = currentFlic2ScanCallback;
@@ -484,30 +493,24 @@ public class Flic2Manager {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             checkScanPermission();
         }
-        synchronized (startScanRunnables) {
-            handler.post(new Runnable() {
-                @Override
-                public void run() {
-                    synchronized (startScanRunnables) {
-                        startScanRunnables.remove(this);
-                    }
-
-                    if (currentScanState != SCAN_STATE_IDLE) {
-                        flic2ScanCallback.onComplete(Flic2ScanCallback.RESULT_FAILED_ALREADY_RUNNING, 0, null);
-                        return;
-                    }
-                    if (!adapter.isEnabled()) {
-                        flic2ScanCallback.onComplete(Flic2ScanCallback.RESULT_FAILED_BLUETOOTH_OFF, 0, null);
-                        return;
-                    }
-                    currentScanCount = 0;
-                    currentScanState = SCAN_STATE_SCANNING;
-                    currentFlic2ScanCallback = flic2ScanCallback;
-                    alreadyPairedButtonsFoundDuringScan.clear();
-                    continueScan();
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (currentScanState != SCAN_STATE_IDLE) {
+                    flic2ScanCallback.onComplete(Flic2ScanCallback.RESULT_FAILED_ALREADY_RUNNING, 0, null);
+                    return;
                 }
-            });
-        }
+                if (!adapter.isEnabled()) {
+                    flic2ScanCallback.onComplete(Flic2ScanCallback.RESULT_FAILED_BLUETOOTH_OFF, 0, null);
+                    return;
+                }
+                currentScanCount = 0;
+                currentScanState = SCAN_STATE_SCANNING;
+                currentFlic2ScanCallback = flic2ScanCallback;
+                alreadyPairedButtonsFoundDuringScan.clear();
+                continueScan();
+            }
+        });
     }
 
     /**
@@ -522,12 +525,6 @@ public class Flic2Manager {
         runOnHandlerThread(new Runnable() {
             @Override
             public void run() {
-                synchronized (startScanRunnables) {
-                    for (Runnable r : startScanRunnables) {
-                        handler.removeCallbacks(r);
-                    }
-                    startScanRunnables.clear();
-                }
                 if (currentScanState == SCAN_STATE_SCANNING) {
                     ScanWrapper.INSTANCE.stopScan(adapter, scanCallback);
                     handler.removeCallbacks(stopScanRunnable);

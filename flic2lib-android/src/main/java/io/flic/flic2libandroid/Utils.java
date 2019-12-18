@@ -131,7 +131,7 @@ class Utils {
             reqObj.put("platform", "Android");
             reqObj.put("package_name", packageName);
             reqObj.put("package_version", packageVersion);
-            reqObj.put("lib_version", "1.0.0");
+            reqObj.put("lib_version", BuildConfig.VERSION_NAME);
         } catch (JSONException e) {
             throw new RuntimeException(e);
         }

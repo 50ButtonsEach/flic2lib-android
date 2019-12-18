@@ -3,13 +3,13 @@ package io.flic.flic2libandroid;
 /**
  * Logger interface.
  *
- * For debugging purposes only.
+ * <p>For debugging purposes only.</p>
  */
 public interface LoggerInterface {
     /**
      * Log an event.
      *
-     * This method is not allowed to call back into the library, or throw exceptions.
+     * <p>This method is not allowed to call back into the library, or throw exceptions.</p>
      *
      * @param bdAddr the address
      * @param action an action text

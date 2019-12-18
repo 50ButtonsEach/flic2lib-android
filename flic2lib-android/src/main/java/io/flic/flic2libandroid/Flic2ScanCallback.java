@@ -83,7 +83,7 @@ public interface Flic2ScanCallback {
      *
      * @param result result code, see {@link Flic2ScanCallback} and {@link Flic2ButtonListener} for a list of codes.
      * @param subCode a subcode
-     * @param button if {@link #RESULT_SUCCESS}, the button object
+     * @param button if {@link #RESULT_SUCCESS}, the button object that is now both connected and ready
      */
     void onComplete(int result, int subCode, Flic2Button button);
 }

@@ -641,7 +641,7 @@ public class Flic2Button {
             req.bootId = bootId;
             req.eventCount = eventCount;
             req.autoDisconnectTime = Flic2Button.this.autoDisconnectTime;
-            req.maxQueuedPackets = 31;
+            req.maxQueuedPackets = useQuickVerify ? 31 : 0;
             req.maxQueuedPacketsAge = 0xfffff;
             sendSignedRequest(req);
         }

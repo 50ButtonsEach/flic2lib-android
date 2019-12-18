@@ -1,1 +1,273 @@
+![Flic Logo Black](https://user-images.githubusercontent.com/2717016/70526105-1bbaa200-1b49-11ea-9aa0-49e7959300c3.png)
+
+[![javadoc](https://javadoc.io/badge2/io.flic/flic2lib-android/javadoc.svg)](https://javadoc.io/doc/io.flic/flic2lib-android)
+
 # Flic2 lib for Android
+
+The official library for Flic2 on Android.
+
+The library is hosted at JCenter and can be included in your Android app by entering the following in your `build.gradle` file:
+
+    dependencies {
+        implementation 'io.flic:flic2lib-android:1.+'
+    }
+
+## License
+
+See [License.txt](License.txt).
+
+# API documentation
+
+See [![javadoc](https://javadoc.io/badge2/io.flic/flic2lib-android/javadoc.svg)](https://javadoc.io/doc/io.flic/flic2lib-android).
+
+# Tutorial
+
+First you need to add the library to your project. The library is hosted at JCenter and can be included in your Android app by entering the following in your `build.gradle` file:
+
+    dependencies {
+        implementation 'io.flic:flic2lib-android:1.+'
+    }
+
+All imported classes are in the package `io.flic.flic2libandroid`. There are two classes of particular interest, `Flic2Manager` and `Flic2Button`. The singleton class `Flic2Manager` keeps track of all the buttons and `Flic2Button` represents a single button.
+
+The manager must first be initialized with the application's `Context` as well as a `Handler`, that defines which thread the library will run on, including all callbacks. To do that, it's recommended to initialize the manager in the `Application` class of your app. If you don't already have one, make a subclass of [Application](https://developer.android.com/reference/android/app/Application) and specify it in your Android manifest:
+
+```java
+public class Flic2SampleApplication extends Application {
+    @Override
+    public void onCreate() {
+        super.onCreate();
+
+        // Initialize the Flic2 manager to run on the same thread as the current thread (the main thread)
+        Flic2Manager manager = Flic2Manager.initAndGetInstance(getApplicationContext(), new Handler());
+
+        // use manager later on
+    }
+}
+```
+
+```xml
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="flic.io.flic2androidsample">
+    <application
+        android:name=".Flic2SampleApplication"
+        ...>
+
+        ...
+    </application>
+</manifest>
+```
+
+Once the manager is initialized, it can always be retrieved again using `Flic2Manager.getInstance()`.
+
+## Scanning for new buttons
+
+To be able to scan for new buttons, the method `startScan` of the manager is used. It will automatically scan, connect and pair a button. The progress is delivered using callbacks. If everything succeeds, you will be given a new `Flic2Button` object.
+
+```java
+Flic2Manager.getInstance().startScan(new Flic2ScanCallback() {
+    @Override
+    public void onDiscoveredAlreadyPairedButton(Flic2Button button) {
+        // Found an already paired button. Try another button.
+    }
+
+    @Override
+    public void onDiscovered(String bdAddr) {
+        // Found Flic2, now connecting...
+    }
+
+    @Override
+    public void onConnected() {
+        // Connected. Now pairing...
+    }
+
+    @Override
+    public void onComplete(int result, int subCode, Flic2Button button) {
+        if (result == Flic2ScanCallback.RESULT_SUCCESS) {
+            // Success!
+            // The button object can now be used
+        } else {
+            // Failed
+        }
+    }
+});
+```
+
+If the scan times out or otherwise fails for some reason, `onComplete` will be called with an error code as result, defined in `Flic2ScanCallback` or `Flic2ButtonListener`.
+
+Before scanning however, we need to acquire the `Manifest.permission.ACCESS_FINE_LOCATION` permission by asking the user. This is due to a requirement of the Android platform in order to scan for Bluetooth Low Energy devices.
+In your activity, use the following code:
+
+```java
+int permissionCheck = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION);
+if (permissionCheck != PackageManager.PERMISSION_GRANTED) {
+    requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
+    return;
+}
+
+// if this line is reached, the permission was already granted and we can now start scan
+```
+
+The `requestPermissions` call will open a popup where the user must press Allow. Android will then call the activity's `onRequestPermissionsResult` method, so we need to implement that:
+
+```java
+@Override
+public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    if (requestCode == 1) {
+        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+            // now startScan can be safely called
+        } else {
+            Toast.makeText(getApplicationContext(), "Scanning needs Location permission, which you have rejected", Toast.LENGTH_SHORT).show();
+        }
+    }
+}
+```
+
+If the permissions are not granted when calling `startScan` on the manager, an `SecurityException` will be thrown.
+
+## Interacting with buttons
+Once we have a `Flic2Button` object, we can start listen to events. Events are delivered to a `Flic2ButtonListener` object that you should extend and override the desired methods. Each button object can have multiple listener objects and they are added and removed by the `addListener` and `removeListener` methods, respectively.
+
+The `Flic2ButtonListener` can both be used to detect connectivity change events as well as different kinds of click events. For example, to show a toast when the button is pressed:
+
+```java
+button.addListener(new Flic2ButtonListener() {
+    @Override
+    public void onButtonUpOrDown(Flic2Button button, boolean wasQueued, boolean lastQueued, long timestamp, boolean isUp, boolean isDown) {
+        if (isDown) {
+            Toast.makeText(getApplicationContext(), "Button " + button + " was pressed", Toast.LENGTH_SHORT).show();
+        }
+    }
+});
+```
+
+There are other kinds of listeners if you instead want to distinguish click, double click and hold. See the API documentation for more information.
+
+If the button was pressed while it was disconnected, the button events will be sent when it later connects (the latest that could fit on the internal memory). Sometimes it's not desired to get old events. In that case the formula `wasQueued && button.getReadyTimestamp() - timestamp > 15000` can be used in the event callback to detect if the event was older than 15 seconds.
+
+The button's desired connectivity state is set using the methods `connect` and `disconnectOrAbortPendingConnection`. Once `connect` is called, the library will try to make sure the button is connected whenever it is in range and Bluetooth is turned on. If the connection gets dropped for any reason, or Bluetooth is toggled off and on, the library will automatically attempt to re-establish the connection. When you want the button to stay disconnected, call `disconnectOrAbortPendingConnection`.
+
+The button listener has the events `onConnected`, `onReady` and `onDisconnected` that are called when the connectivity state changes. The `onConnected` and `onDisconnected` callbacks represent the Bluetooth connectivity, while `onReady` is called shortly after `onConnected` when the library has completed some initial transactions, such as configuring the communication channel and verified the pairing.
+
+The callback `onUnpaired` should also be implemented, which will be called if the button has been factory reset. From that point the button is removed and detached from the library, and the button object cannot be used anymore. To add it back, the user must re-scan the button.
+
+To get a list of all paired buttons (usually at application startup), use the method `getButtons` on the manager object. All paired buttons are saved to disk in an internal database file, so the pairings remain even if the Android device is restarted. When the application starts, the buttons are always in the disconnected state, and you need to explicitly call `connect` on the buttons you want connected.
+
+# Background execution
+
+It is common that apps using Flic buttons want to be able to receive button events even when the app is not visible on the screen, or the screen is turned off. Usually Android kills the app process after inactivity or when it wants to reclaim memory. The official way of avoiding the process to be killed is to use a [Foreground Service](https://developer.android.com/guide/components/services#Foreground). A foreground service can be written like this:
+
+```java
+public class Flic2SampleService extends Service {
+    private static final int SERVICE_NOTIFICATION_ID = 123;
+    private final String NOTIFICATION_CHANNEL_ID = "Notification_Channel_Flic2SampleService";
+    private final CharSequence NOTIFICATION_CHANNEL_NAME = "Flic2Sample";
+
+    @Override
+    public void onCreate() {
+        super.onCreate();
+
+        Intent notificationIntent = new Intent(this, MainActivity.class);
+        PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_CANCEL_CURRENT);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationChannel mChannel = new NotificationChannel(NOTIFICATION_CHANNEL_ID, NOTIFICATION_CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
+            NotificationManager notificationManager = (NotificationManager) this.getSystemService(Context.NOTIFICATION_SERVICE);
+            notificationManager.createNotificationChannel(mChannel);
+        }
+
+        Notification notification = new NotificationCompat.Builder(this.getApplicationContext(), NOTIFICATION_CHANNEL_ID)
+                .setContentTitle("Flic2Sample")
+                .setContentText("Flic2Sample")
+                .setSmallIcon(R.mipmap.ic_launcher)
+                .setContentIntent(contentIntent)
+                .setOngoing(true)
+                .build();
+        startForeground(SERVICE_NOTIFICATION_ID, notification);
+    }
+
+    @Override
+    public IBinder onBind(Intent intent) {
+        throw new UnsupportedOperationException("Not implemented");
+    }
+}
+```
+
+If we want the foreground service to always run as soon as the application starts, we can start it in the `onCreate` method of our `Application` class:
+
+```java
+// To prevent the application process from being killed while the app is running in the background, start a Foreground Service
+ContextCompat.startForegroundService(getApplicationContext(), new Intent(getApplicationContext(), Flic2SampleService.class));
+```
+
+It also needs to be added to the manifest, inside the `<application>` section:
+
+```xml
+<service
+    android:name=".Flic2SampleService"
+    android:enabled="true"
+    android:exported="false">
+</service>
+```
+
+Also a permission needs to be added directly inside the `<manifest>` tag:
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+```
+
+Note that the service class itself doesn't need to do anything. As long as it is running it will keep the rest of the process, including the Flic2 library, to stay alive.
+
+Another idea would be to only run your Foreground Service when you have at least one button you want to stay connected, but requires slightly more code.
+
+In order to automatically start the application after boot of the device, as well as when the app has been updated, we need to implement two broadcast receivers. In the service class (or anywhere else appropriate), implement the following to handlers:
+
+```java
+public static class BootUpReceiver extends BroadcastReceiver {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        // The Application class's onCreate has already been called at this point, which is what we want
+    }
+}
+
+public static class UpdateReceiver extends BroadcastReceiver {
+    @Override
+    public void onReceive(Context context, Intent intent) {
+        // The Application class's onCreate has already been called at this point, which is what we want
+    }
+}
+```
+
+And register the receivers in the manifest inside the `<application>` tag:
+
+```xml
+<receiver
+    android:name=".Flic2SampleService$BootUpReceiver"
+    android:enabled="true"
+    android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
+    <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+        <category android:name="android.intent.category.DEFAULT" />
+    </intent-filter>
+</receiver>
+
+<receiver
+    android:name=".Flic2SampleService$UpdateReceiver"
+    android:enabled="true">
+    <intent-filter>
+        <action android:name="android.intent.action.PACKAGE_REPLACED" />
+        <data
+            android:path="[YOUR PACKAGE NAME HERE]"
+            android:scheme="package" />
+        <category android:name="android.intent.category.LAUNCHER" />
+    </intent-filter>
+</receiver>
+```
+
+We also need to declare the permission directly inside the `<manifest>` tag:
+
+```xml
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+```
+
+The receivers don't need to do anything, since their only intention is to start the app process. When the app process starts, the `Application` class's `onCreate` method is always called first before any other components are created.
