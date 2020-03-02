@@ -266,6 +266,13 @@ abstract class TxPacket {
         }
     }
 
+    static class GetNameRequest extends TxPacket {
+        @Override
+        protected void write(Writer w) {
+            w.opcode(GET_NAME_REQUEST);
+        }
+    }
+
     static class SetNameRequest extends TxPacket {
         long timestampUtcMs;
         boolean forceUpdate;

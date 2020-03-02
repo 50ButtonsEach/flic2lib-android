@@ -182,9 +182,10 @@ public class Flic2ButtonListener {
      * <p>Usually called shortly after {@link #onReady(Flic2Button, long)} and then every third hour,
      * as long as the button stays connected.</p>
      *
+     * @param button The {@link Flic2Button} that fired the event.
      * @param level A non-null {@link BatteryLevel} object
      */
-    public void onBatteryLevelUpdated(BatteryLevel level) {
+    public void onBatteryLevelUpdated(Flic2Button button, BatteryLevel level) {
     }
 
     /**
@@ -280,4 +281,13 @@ public class Flic2ButtonListener {
     public void onButtonSingleOrDoubleClickOrHold(Flic2Button button, boolean wasQueued, boolean lastQueued, long timestamp, boolean isSingleClick, boolean isDoubleClick, boolean isHold) {
     }
 
+    /**
+     * All queued button events processed handler.
+     *
+     * <p>Emitted after all queued button events have been emitted, or immediately after {@link #onReady(Flic2Button, long)} if there are no queued events.</p>
+     *
+     * @param button The {@link Flic2Button} that fired the event.
+     */
+    public void onAllQueuedButtonEventsProcessed(Flic2Button button) {
+    }
 }

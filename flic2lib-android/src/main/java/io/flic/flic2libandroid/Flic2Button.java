@@ -1,5 +1,6 @@
 package io.flic.flic2libandroid;
 
+import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.LinkedList;
@@ -18,12 +19,13 @@ import javax.crypto.Mac;
 public class Flic2Button {
     /**
      * The button is in the disconnected state. No connection attempt is currently in progress.
-     * Call {@link #connect()} if you would like to establish a connection as soon as the button comes in range.
+     * Call {@link #connect()} if you would like to establish a connection as soon as the button
+     * comes in range and advertises.
      */
     public static final int CONNECTION_STATE_DISCONNECTED = 0;
 
     /**
-     * The manager is waiting for the button to become in range, at which time it should automatically connect.
+     * The manager is waiting for the button to come in range and advertise, at which time it should automatically connect.
      * Note that this state is also possible when Bluetooth is turned off, in which case it means
      * the manager will wait for Bluetooth to become turned on and then connect.
      */
@@ -76,6 +78,7 @@ public class Flic2Button {
     boolean isConnected;
     boolean wantConnected;
     Runnable disconnectRunnable;
+    Runnable retryConnectRunnable;
 
     private SafeIterableList<Flic2ButtonListener> listeners = new SafeIterableList<>();
     final Flic2ButtonListener listener = new Flic2ButtonListener() {
@@ -157,9 +160,16 @@ public class Flic2Button {
         }
 
         @Override
-        public void onBatteryLevelUpdated(BatteryLevel level) {
+        public void onBatteryLevelUpdated(Flic2Button button, BatteryLevel level) {
             for (Flic2ButtonListener listener : listeners) {
-                listener.onBatteryLevelUpdated(level);
+                listener.onBatteryLevelUpdated(button, level);
+            }
+        }
+
+        @Override
+        public void onAllQueuedButtonEventsProcessed(Flic2Button button) {
+            for (Flic2ButtonListener listener : listeners) {
+                listener.onAllQueuedButtonEventsProcessed(button);
             }
         }
     };
@@ -300,12 +310,22 @@ public class Flic2Button {
      * <p>This sets a new name of the button. The new name will be written to the button's internal memory.
      * If the button is disconnected it will sync when it later connects.</p>
      *
-     * @param name a name of max 23 bytes (after UTF-8 conversion), must not be null
+     * <p>Assuming this method is called on the manager's handler's thread, the name returned by
+     * {@link #getName()} will immediately reflect the newly set name.</p>
+     *
+     * <p>If {@link #isUnpaired()} is true however, this method will do nothing.</p>
+     *
+     * @param name a name which will be truncated so that it takes up at most 23 bytes (after UTF-8 conversion), must not be null
      */
-    public void setName(final String name) {
+    public void setName(String name) {
         if (name == null) {
-            throw new NullPointerException();
+            throw new IllegalArgumentException("name is null");
         }
+        byte[] asUtf8 = name.getBytes(StandardCharsets.UTF_8);
+        if (asUtf8.length > 23) {
+            name = new String(asUtf8, 0, Utils.truncateUTF8StringToMaxLenBytes(asUtf8, 23), StandardCharsets.UTF_8);
+        }
+        final String finalName = name;
         manager.runOnHandlerThread(new Runnable() {
             @Override
             public void run() {
@@ -314,11 +334,11 @@ public class Flic2Button {
                 }
 
                 Flic2Button.this.nameTimestampUtcMs = System.currentTimeMillis();
-                Flic2Button.this.name = name;
+                Flic2Button.this.name = finalName;
                 manager.database.updateName(Flic2Button.this);
                 if (Flic2Button.this.isConnected) {
                     Session s = Flic2Button.this.currentGattCb.getSession();
-                    if (s != null && s.isEstablished()) {
+                    if (s != null && s.isEstablished() && s.gotInitialButtonEvents) {
                         s.sendSetName();
                     }
                 }
@@ -515,7 +535,9 @@ public class Flic2Button {
         private int firmwareUpdateSentPos;
         private int firmwareUpdateAckPos;
 
-        private boolean setNameRequestPending;
+        private boolean gotInitialButtonEvents;
+
+        private boolean nameRequestPending;
         private boolean shouldResendNameRequest;
 
         private Runnable batteryCheckTimerRunnable;
@@ -670,18 +692,20 @@ public class Flic2Button {
         }
 
         private void initialSetName() {
-            if (!setNameRequestPending) {
+            if (Flic2Button.this.nameTimestampUtcMs == 0) {
+                sendSignedRequest(new TxPacket.GetNameRequest());
+            } else {
                 TxPacket.SetNameRequest req = new TxPacket.SetNameRequest(Flic2Button.this.nameTimestampUtcMs, false, Flic2Button.this.name);
                 sendSignedRequest(req);
-                setNameRequestPending = true;
             }
+            nameRequestPending = true;
         }
 
         private void sendSetName() {
-            if (!setNameRequestPending) {
+            if (!nameRequestPending) {
                 TxPacket.SetNameRequest req = new TxPacket.SetNameRequest(Flic2Button.this.nameTimestampUtcMs, true, Flic2Button.this.name);
                 sendSignedRequest(req);
-                setNameRequestPending = true;
+                nameRequestPending = true;
             } else {
                 shouldResendNameRequest = true;
             }
@@ -691,18 +715,18 @@ public class Flic2Button {
             sendSignedPacket(new TxPacket.SetAutoDisconnectTimeInd(Flic2Button.this.autoDisconnectTime));
         }
 
-        private void onGotName(long timestampUtcMs, String name) {
-            setNameRequestPending = false;
+        private void onGotName(String name) {
+            nameRequestPending = false;
             if (shouldResendNameRequest) {
                 shouldResendNameRequest = false;
                 sendSetName();
                 return;
             }
             if (!name.equals(Flic2Button.this.name)) {
+                onNameUpdated(name);
+            } else {
                 Flic2Button.this.nameTimestampUtcMs = 0;
-                Flic2Button.this.name = name;
                 manager.database.updateName(Flic2Button.this);
-                listener.onNameUpdated(Flic2Button.this, name);
             }
         }
 
@@ -774,6 +798,7 @@ public class Flic2Button {
         }
 
         private void afterInitialButtonEventsReceived() {
+            gotInitialButtonEvents = true;
             sendAdvSettingsIfNeeded();
             initialSetName();
             sendConnParamsUpdate(80, 90, 17, 800);
@@ -841,6 +866,11 @@ public class Flic2Button {
                     }
 
                     if (pendingRxPacket != null) {
+                        if (pendingRxPacket.length + (value.length - 1) > 128) {
+                            // Invalid packet, drop
+                            pendingRxPacket = null;
+                            return;
+                        }
                         pendingRxPacket = Utils.concatArrays(pendingRxPacket, value, 1);
                     } else {
                         pendingRxPacket = Arrays.copyOfRange(value, 1, value.length);
@@ -894,14 +924,8 @@ public class Flic2Button {
                     System.arraycopy(p.bdAddr, 0, msg, 0, 6);
                     msg[6] = (byte) (p.bdAddrType ? 1 : 0);
                     System.arraycopy(p.publicKey, 0, msg, 7, 32);
-                    int i;
-                    for (i = 0; i < 4; i++) {
-                        p.signature[32] = (byte) ((p.signature[32] & ~3) | i);
-                        if (Flic2Crypto.ed25519Verify(p.signature, msg)) {
-                            break;
-                        }
-                    }
-                    if (i == 4) {
+                    int i = Flic2Crypto.ed25519Verify(p.signature, msg);
+                    if (i < 0) {
                         // Report failure, invalid signature
                         state = STATE_FAILED;
                         listener.onFailure(Flic2Button.this, Flic2ButtonListener.FAILURE_GENUINE_CHECK_FAILED, Flic2ButtonListener.FAILURE_GENUINE_CHECK_FAILED_SUBCODE_INVALID_CERTIFICATE);
@@ -1057,6 +1081,8 @@ public class Flic2Button {
                 if (opcode == RxPacket.TEST_IF_REALLY_UNPAIRED_RESPONSE && state == STATE_WAIT_TEST_IF_REALLY_UNPAIRED_RESPONSE) {
                     RxPacket.TestIfReallyUnpairedResponse rsp = new RxPacket.TestIfReallyUnpairedResponse(pkt);
 
+                    state = STATE_FAILED;
+
                     Mac hmac = Utils.createHmacSha256(fullVerifySharedSecret);
                     hmac.update(new byte[]{'P', 'T'});
                     hmac.update(Utils.intToBytes(Flic2Button.this.pairingData.identifier));
@@ -1138,7 +1164,11 @@ public class Flic2Button {
 
                     // Battery level should be non-null when !useQuickVerify, but check as a precaution
                     if (!useQuickVerify && Flic2Button.this.lastKnownBatteryVoltage != null) {
-                        listener.onBatteryLevelUpdated(new BatteryLevel(Flic2Button.this.lastKnownBatteryVoltage, Flic2Button.this.lastKnownBatteryTimestampUtcMs));
+                        listener.onBatteryLevelUpdated(Flic2Button.this, new BatteryLevel(Flic2Button.this.lastKnownBatteryVoltage, Flic2Button.this.lastKnownBatteryTimestampUtcMs));
+                    }
+
+                    if (!rsp.hasQueuedEvents) {
+                        listener.onAllQueuedButtonEventsProcessed(Flic2Button.this);
                     }
                     return;
                 }
@@ -1199,17 +1229,18 @@ public class Flic2Button {
 
                         if (type == 0) {
                             // up
-                            listener.onButtonUpOrDown(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false);
+                            listener.onButtonUpOrDown(Flic2Button.this, item.wasQueued, item.wasQueuedLast && wasHold && !singleClick && !doubleClick, item.timestamp, true, false);
                             if (!wasHold) {
-                                listener.onButtonClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false);
+                                listener.onButtonClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast && !singleClick && !doubleClick, item.timestamp, true, false);
                                 if (singleClick) {
-                                    listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false, false);
+                                    listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, false, item.timestamp, true, false, false);
                                 }
                             }
-                            if (singleClick)
+                            if (singleClick) {
                                 listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false);
+                            }
                             if (doubleClick) {
-                                listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, true);
+                                listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, false, item.timestamp, false, true);
                                 listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, true, false);
                             }
                         } else if (type == 1) {
@@ -1217,17 +1248,20 @@ public class Flic2Button {
                             listener.onButtonUpOrDown(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, true);
                         } else if (type == 2) {
                             // single click timeout
-                            listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false);
+                            listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, false, item.timestamp, true, false);
                             listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false, false);
                         } else if (type == 3) {
                             // hold
-                            listener.onButtonClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, true);
+                            listener.onButtonClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast && nextUpWillBeDoubleClick, item.timestamp, false, true);
                             if (!nextUpWillBeDoubleClick) {
                                 listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, false, true);
                             }
                         }
                         if ((type == 0 && (singleClick || doubleClick)) || type == 2) {
                             sendAck = true;
+                        }
+                        if (item.wasQueuedLast) {
+                            listener.onAllQueuedButtonEventsProcessed(Flic2Button.this);
                         }
                         anyWasLastQueued |= item.wasQueuedLast;
                     }
@@ -1311,7 +1345,7 @@ public class Flic2Button {
                     Flic2Button.this.lastKnownBatteryTimestampUtcMs = System.currentTimeMillis();
                     manager.database.updateBatteryLevel(Flic2Button.this);
                     log("Battery level: " + rsp.level);
-                    listener.onBatteryLevelUpdated(new BatteryLevel(Flic2Button.this.lastKnownBatteryVoltage, Flic2Button.this.lastKnownBatteryTimestampUtcMs));
+                    listener.onBatteryLevelUpdated(Flic2Button.this, new BatteryLevel(Flic2Button.this.lastKnownBatteryVoltage, Flic2Button.this.lastKnownBatteryTimestampUtcMs));
                     sendBatteryLevelRequestDelayed();
                     return;
                 }
@@ -1320,13 +1354,25 @@ public class Flic2Button {
                     responseReceived();
                     RxPacket.GetSetNameResponse rsp = new RxPacket.GetSetNameResponse(pkt);
                     log("Name: " + rsp.name);
-                    onGotName(rsp.timestampUtcMs, rsp.name);
+                    onGotName(rsp.name);
+                    return;
+                }
+
+                if (opcode == RxPacket.GET_NAME_RESPONSE && pkt.length >= 6) {
+                    responseReceived();
+                    RxPacket.GetSetNameResponse rsp = new RxPacket.GetSetNameResponse(pkt);
+                    log("Got name: " + rsp.name);
+                    onGotName(rsp.name);
                     return;
                 }
 
                 if (opcode == RxPacket.NAME_UPDATED_NOTIFICATION) {
-                    RxPacket.NameUpdatedNotification notification = new RxPacket.NameUpdatedNotification(pkt);
-                    onNameUpdated(notification.name);
+                    if (Flic2Button.this.nameTimestampUtcMs == 0) {
+                        RxPacket.NameUpdatedNotification notification = new RxPacket.NameUpdatedNotification(pkt);
+                        if (!notification.name.equals(Flic2Button.this.name)) {
+                            onNameUpdated(notification.name);
+                        }
+                    }
                     return;
                 }
 

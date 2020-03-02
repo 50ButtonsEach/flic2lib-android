@@ -4,7 +4,7 @@ package io.flic.flic2libandroid;
  * Battery level.
  *
  * @see Flic2Button#getLastKnownBatteryLevel()
- * @see Flic2ButtonListener#onBatteryLevelUpdated(BatteryLevel)
+ * @see Flic2ButtonListener#onBatteryLevelUpdated(Flic2Button, BatteryLevel)
  */
 public class BatteryLevel {
     private float voltage;

@@ -172,6 +172,17 @@ public class Flic2Manager {
         return INSTANCE;
     }
 
+    private BluetoothAdapter getBluetoothAdapter() {
+        // It has been observed that BluetoothAdapter.getDefaultAdapter() sometimes returns null immediately after boot.
+        // This method makes it possible to query the adapter again if previous call returned null.
+        BluetoothAdapter adapter = this.adapter;
+        if (adapter != null) {
+            return adapter;
+        }
+        this.adapter = adapter = BluetoothAdapter.getDefaultAdapter();
+        return adapter;
+    }
+
     /**
      * Set logger.
      *
@@ -223,7 +234,8 @@ public class Flic2Manager {
         public void onReceive(Context context, Intent intent) {
             final int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE, BluetoothAdapter.ERROR);
             //Log.d("Flic2Manager", "StateChange: " + state);
-            log("bt change", state + " " + adapter.isEnabled());
+            BluetoothAdapter adapter = getBluetoothAdapter();
+            log("bt change", state + " " + (adapter != null ? adapter.isEnabled() : "adapter is null"));
             handler.post(new Runnable() {
                 @Override
                 public void run() {
@@ -241,18 +253,18 @@ public class Flic2Manager {
                     if (state != BluetoothAdapter.STATE_ON) {
                         if (currentScanState != SCAN_STATE_IDLE) {
                             if (currentScanState == SCAN_STATE_SCANNING) {
-                                ScanWrapper.INSTANCE.stopScan(adapter, scanCallback);
+                                ScanWrapper.INSTANCE.stopScan(Flic2Manager.this.adapter, scanCallback);
                             }
                             if (currentScanState == SCAN_STATE_CONNECTING || currentScanState == SCAN_STATE_VERIFYING) {
                                 disconnectGatt(currentScanButton);
                             }
                             cleanupScan().onComplete(Flic2ScanCallback.RESULT_FAILED_BLUETOOTH_OFF, 0, null);
                         }
-                    } else {
+                    } else if (getBluetoothAdapter() != null) {
                         // Turned on, so recreate GATT objects for devices we want connected
                         for (Flic2Button button : allButtons) {
                             if (button.wantConnected) {
-                                normalConnect(button);
+                                connectGatt(button);
                             }
                         }
                     }
@@ -500,7 +512,8 @@ public class Flic2Manager {
                     flic2ScanCallback.onComplete(Flic2ScanCallback.RESULT_FAILED_ALREADY_RUNNING, 0, null);
                     return;
                 }
-                if (!adapter.isEnabled()) {
+                BluetoothAdapter adapter = getBluetoothAdapter();
+                if (adapter == null || !adapter.isEnabled()) {
                     flic2ScanCallback.onComplete(Flic2ScanCallback.RESULT_FAILED_BLUETOOTH_OFF, 0, null);
                     return;
                 }
@@ -624,6 +637,7 @@ public class Flic2Manager {
             log(button.bdAddr, "gatt null");
             if (adapter.isEnabled()) {
                 // Usually null is never returned if the Bluetooth was turned on
+                gattFailed(button);
                 if (button.disconnectRunnable != null) {
                     button.disconnectRunnable.run();
                 }
@@ -634,6 +648,21 @@ public class Flic2Manager {
         cb.gatt = gatt;
         button.currentGattCb = cb;
         cb.createdTime = SystemClock.uptimeMillis();
+    }
+
+    private void gattFailed(final Flic2Button button) {
+        if (button.currentGattCb != null) {
+            button.currentGattCb.gatt.close();
+            button.currentGattCb = null;
+        }
+        button.retryConnectRunnable = new Runnable() {
+            @Override
+            public void run() {
+                button.retryConnectRunnable = null;
+                connectGatt(button);
+            }
+        };
+        handler.postDelayed(button.retryConnectRunnable, (long)(1000 * 60 * (20 + Math.random() * 3)));
     }
 
     private boolean disconnectGatt(Flic2Button button) {
@@ -659,15 +688,15 @@ public class Flic2Manager {
             button.currentGattCb.cleanup();
             button.currentGattCb = null;
         }
+        if (button.retryConnectRunnable != null) {
+            handler.removeCallbacks(button.retryConnectRunnable);
+            button.retryConnectRunnable = null;
+        }
         if (button.isConnected) {
             button.isConnected = false;
             return true;
         }
         return false;
-    }
-
-    private void normalConnect(Flic2Button button) {
-        connectGatt(button);
     }
 
     void connectButton(final Flic2Button button) {
@@ -679,8 +708,9 @@ public class Flic2Manager {
                     return;
                 }
                 button.wantConnected = true;
-                if (adapter.isEnabled()) {
-                    normalConnect(button);
+                BluetoothAdapter adapter = getBluetoothAdapter();
+                if (adapter != null && adapter.isEnabled()) {
+                    connectGatt(button);
                 }
             }
         });
@@ -1083,6 +1113,7 @@ public class Flic2Manager {
                             button.listener.onConnect(button);
                         } else {
                             // Should only happen in Android 4.4 and lower
+                            gattFailed(button);
                             button.listener.onFailure(button, Flic2ButtonListener.FAILURE_GATT_CONNECT_ANDROID_ERROR, status);
                         }
                     } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
@@ -1102,6 +1133,7 @@ public class Flic2Manager {
                             // Common error status codes:
                             // 128: No resources to open a new connection
                             // 257: can't Register GATT client, MAX client reached: 32
+                            gattFailed(button);
                             button.listener.onFailure(button, Flic2ButtonListener.FAILURE_GATT_CONNECT_ANDROID_ERROR, status);
                         }
                     }

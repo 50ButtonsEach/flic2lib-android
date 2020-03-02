@@ -924,6 +924,22 @@ class Flic2Crypto {
         return out;
     }*/
 
+    private static void inv4(Fe a, Fe b, Fe c, Fe d) {
+        Fe ab = new Fe(), cd = new Fe(), z = new Fe();
+        mul(ab, a, b);
+        mul(cd, c, d);
+        mul(z, ab, cd);
+        pow(z, z, false);
+        mul(ab, ab, z);
+        mul(cd, cd, z);
+        z = new Fe(a);
+        mul(a, cd, b);
+        mul(b, cd, z);
+        z = new Fe(c);
+        mul(c, ab, d);
+        mul(d, ab, z);
+    }
+
     public static class Precomp {
         public Fe YpX, YmX, T2d;
 
@@ -971,9 +987,9 @@ class Flic2Crypto {
     private static final Precomp[] precompA = Precomp.fromString("9Lekk7h2EVU2zoom9xFdttKpIOwuy8ZZ0CVy6965iV69y9W4t9OEASv/peGJ9SPAByywumIKE5NBx+ZVqsi0V31bihCJx0+oYW9LYWyy0XhN/ACe9MCloX7MmNpxPjVfodTIubsArEYKQAVEvwzPpWD3ma8raLzshs5gZ5tFKipAT4i7kK+y+e+RvcMdmLuc/iCPHE+G+3TbbadwndO5clmCheArFkwL/tvkPJW2L7mrSEJ+75O96j2mnKQA4qFLqcMGH/5BiJDxMpyxRfgoMDEhpVzi3zyOgoLjME+KNz7AVBPo64O8uxQ9WdhNvso2VyqVZ8iifXSN5UIcA+2sYFkQBQ3C4b2CysRQrWY/uQ955NvkRfq5r4v84RuKxTUymZIwxIwKh+s2aLrjAUmi9hZzRJDtJ00Ym6qpJoQL6wfzoEaxMC/J5g4M98F4Gz+rscXdDNs7D0aW1fzrvrt5BfjDngYu4//RutH7k99ivotkY7mF4Zl5ses37SdmXyodHuktfKgHGn+Z9+Vp35WiiIKRWILLsOuZzMfodpm+s0J84j2YsR+lMvDc5Dr1LeDZL6JiGrkZTNkukdg6I9GhIZjFL0KxvjjF/MgnieD4T+RVslBqAytMTpOIe4YhXX9yYjoTVeJll5RfuXPVvZI9b7uqQaYb3arBATsKUYBbRFf83FNpGGNq4QWuwuipjM8XmvGJIanbsMvTmHJ3RnlQEc8BCBcnp2ERFkGSZVpvzPY/Oqfa/KRtkgqZy5d8reAporQIIDxm1txOnbvtZHC2PdHykP3/nPNEwYwEg8IzpE1C0rj5A+Yk/Kak9uksv32fC0I0yuFcbaBHw84W3xZUM/6yqQAhFFTwKlk3r4czixhFi8/QpcnA4ERM2i5GSBAHGkIGNPWzcG+JBFrH7ZIg6544NySq/G/wEzkB4bWZ4TeV3haJ7cW5IwFbGwH7tQxG52qBlEg9DKgn1Ht6WnMKLjAI5VTUd9KfNlyOUb27S+kxsTTprnESVgZmET2dTeptnVTEJ7AQzzqZAtPoEZH5JWaYnVGz1A3sGOnYYXRhNX/2KoRYCpmX/MI3y5gUy/pdSlmyPc/7sJX3AHtd8v9rRqaG0Dx/SQe2F+dvPXiiOtsrcnVK3Hd6LJMnav+eMEg5");
     private static final Precomp[] precompB = Precomp.fromString("PjhzJMiisEtUSJrTHNmTi1GLRaruwoNkJ2gISEaUzkut0IjbE6ji48FNsVs9sUBv0iseVSVUccZtOWTErrcFQBx57FuC4YDMJXZtr9CptOCYLrsvfTVNYdpDpmN2u3cc52g+rlm10ha9rEdYc2LFb3UIKZZUH4m5Zorzb8/9qEOwNHGdddLe6Q0Ke1STtbzn+0RzAvBlvF6ngLyJjzVPZrTrFWdkOdQ98aPkO/GSTRFZwdRXZ4tD4YVs73ycfLVRgUcErAU+FJlShnLGpv2AVdK8FQzZhPQ+VybOSB6cnR3J1Q1aZRszH9MrhslhX1QLM3hzFbOJlzlc1EN3kHNQE6serfUvhuATetFxkLlj+v7rjILzk2Y32FoFXUqx51YKnIxfJWrOz63uiETJQXfYi/1bRATUlDoJihTp/PMRJXs+WyO/90ZCEst92B5Ubn7oklU4wTTsUngTX0JliFoYfO+v2Z6OgU+XGXwGawE5MwOl8GWh3Zp8RLVXGBSgBGRZjQy/2B8biffJrgufiydSszPizaw5FyYIXMjZ8lSHaG4tSpSEkY9jggQwgpetrlRh7qzAL99Jo3jAWeBHpN2qEbnPVPLZM2Oj2sPvDVQ8+L6iym/1w/iWjrutd0sjssxCM9n9d2j90sxCnnVD/m53gnTDl+Sf9MTeGowkSFdpRF6rcZovxID4YzoGApGwkQtF0Rsp1IJ86UZu+6j4s/7SQ/4fCZd0Fr0oCKdLndCVKXCU7QBfGtM3+7wSFJ/v+04VolNgFcguewUpkf3yJrSsDdXdEL0gjQ3jLrObB52WtyedERonsHR+CEIfDgsn4MBnj2QrDZ2D3O6Lipz7lqDmaoGCjZBaPiSn0YxRj9qM4XKs3I0fO+jj8jx7j726PdFwQrj7R2frfhOLGoFgdVzfeZrI+HFvpytawv/IO1YqlQk8+H7cS8uooibCk1/6xrWWpeNkBhvr69Qvz8bl3EqbQMRQQ4O5PdVEtAX1pQWTKYkv/0lZovoi+2R9ZQSnaLlphTuM9caTvC8ZDoz7xi2Tz8JCPWSYSAsnZbrUMzqdzwc+kUDXBTkQnbO+QNEFnzn9CYqPaDSEwaVnEviYki/9RGiqeocFEsmrnsSqzCPo2SaMWUPdy30bWqhlDJ9oexFv");
     private static BigInteger order = new BigInteger("1000000000000000000000000000000014def9dea2f79cd65812631a5cf5d3ed", 16);
-    public static boolean ed25519VerifyHram(byte[] signature, byte[] hram) {
+    public static int ed25519VerifyHram(byte[] signature, byte[] hram) {
         if ((signature[63] & 0xe0) != 0) {
-            return false;
+            return -1;
         }
         byte[] hramBigEndian = new byte[64];
         for (int i = 0; i < 64; i++) {
@@ -998,6 +1014,7 @@ class Flic2Crypto {
 
         aScalar[32] = 1;
         bScalar[32] = 1;
+        bScalar[0] |= 3;
 
         for (int i = 64; i > 0; i--) {
             edwardsDbl(tT1, tX, tY, tZ, tX, tY, tZ, tT2);
@@ -1036,7 +1053,32 @@ class Flic2Crypto {
             edwardsP1P1ToP3(tX, tY, tZ, tT2, tT1, tX, tY, tZ);
             edwardsAddSub(tT1, tX, tY, tZ, tX, tY, tZ, tT2, false, qA.YpX, qA.YmX, qA.T2d);
         }
-        if ((bScalar[0] & 1) == 0) {
+
+        Precomp qB = precompB[8];
+        edwardsP1P1ToP3(tX, tY, tZ, tT2, tT1, tX, tY, tZ);
+        Fe x3 = new Fe(tX), y3 = new Fe(tY), z3 = new Fe(tZ);
+        edwardsAddSub(tT1, tX, tY, tZ, tX, tY, tZ, tT2, true, qB.YpX, qB.YmX, qB.T2d);
+        edwardsP1P1ToP3(tX, tY, tZ, tT2, tT1, tX, tY, tZ);
+        Fe x2 = new Fe(tX), y2 = new Fe(tY), z2 = new Fe(tZ);
+        edwardsAddSub(tT1, tX, tY, tZ, tX, tY, tZ, tT2, true, qB.YpX, qB.YmX, qB.T2d);
+        edwardsP1P1ToP3(tX, tY, tZ, tT2, tT1, tX, tY, tZ);
+        Fe x1 = new Fe(tX), y1 = new Fe(tY), z1 = new Fe(tZ);
+        edwardsAddSub(tT1, tX, tY, tZ, tX, tY, tZ, tT2, true, qB.YpX, qB.YmX, qB.T2d);
+        edwardsP1P1ToP3(tX, tY, tZ, tT2, tT1, tX, tY, tZ);
+        inv4(tZ, z1, z2, z3);
+        Fe[][] p = new Fe[][] {{tX, tY, tZ}, {x1, y1, z1}, {x2, y2, z2}, {x3, y3, z3}};
+        for (int i = 0; i < 4; i++) {
+            mul(p[i][0], p[i][0], p[i][2]);
+            mul(p[i][1], p[i][1], p[i][2]);
+            byte[] yBytes = toBytes(p[i][1]);
+            byte[] xBytes = toBytes(p[i][0]);
+            yBytes[31] |= xBytes[0] << 7;
+            if (Arrays.equals(yBytes, Arrays.copyOfRange(signature, 0, 32))) {
+                return i;
+            }
+        }
+        return -1;
+        /*if ((bScalar[0] & 1) == 0) {
             Precomp qB = precompB[8];
             edwardsP1P1ToP3(tX, tY, tZ, tT2, tT1, tX, tY, tZ);
             edwardsAddSub(tT1, tX, tY, tZ, tX, tY, tZ, tT2, true, qB.YpX, qB.YmX, qB.T2d);
@@ -1048,11 +1090,11 @@ class Flic2Crypto {
         byte[] yBytes = toBytes(tY);
         byte[] xBytes = toBytes(tX);
         yBytes[31] |= xBytes[0] << 7;
-        return Arrays.equals(yBytes, Arrays.copyOfRange(signature, 0, 32));
+        return Arrays.equals(yBytes, Arrays.copyOfRange(signature, 0, 32));*/
     }
 
     private static byte[] pubkeyBytes = new byte[] {(byte)211, 63, 36, 64, (byte)221, 84, (byte)179, 27, 46, 29, (byte)207, 64, 19, 46, (byte)250, 65, (byte)216, (byte)248, (byte)167, 71, 65, 104, (byte)223, 64, 8, (byte)245, (byte)169, 95, (byte)179, (byte)176, (byte)208, 34};
-    public static boolean ed25519Verify(byte[] signature, byte[] message) {
+    public static int ed25519Verify(byte[] signature, byte[] message) {
         byte[] hram;
         try {
             MessageDigest md = MessageDigest.getInstance("SHA-512");

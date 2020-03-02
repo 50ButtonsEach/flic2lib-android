@@ -85,6 +85,32 @@ class Utils {
         return new byte[] {(byte)i, (byte)(i >> 8), (byte)(i >> 16), (byte)(i >> 24)};
     }
 
+    static int truncateUTF8StringToMaxLenBytes(byte[] str, int maxByteLen) {
+        int byteLen = str.length;
+        if (byteLen < maxByteLen) {
+            return byteLen;
+        }
+        int bytePos = 0;
+        while (bytePos < byteLen) {
+            byte c = str[bytePos];
+            int charByteLen = 1;
+            if ((c & 0xe0) == 0xc0) {
+                charByteLen = 2;
+            }
+            else if ((c & 0xf0) == 0xe0) {
+                charByteLen = 3;
+            }
+            else if ((c & 0xf8) == 0xf0) {
+                charByteLen = 4;
+            }
+            if (bytePos + charByteLen > maxByteLen || bytePos + charByteLen > byteLen) {
+                break;
+            }
+            bytePos += charByteLen;
+        }
+        return bytePos;
+    }
+
     private static byte[] downloadFirmware(String urlString) throws IOException {
         HttpURLConnection conn = null;
         try {
