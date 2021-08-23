@@ -6,10 +6,19 @@
 
 The official library for Flic2 on Android.
 
-The library is hosted at JCenter and can be included in your Android app by entering the following in your `build.gradle` file:
+The library is hosted at JitPack and can be included in your Android app by entering the following in your `build.gradle` file:
 
     dependencies {
-        implementation 'io.flic:flic2lib-android:1.+'
+        implementation 'com.github.50ButtonsEach:flic2lib-android:1.+'
+    }
+
+If you have not already done so, include the JitPack repository in your root `build.gradle` file:
+
+    allprojects {
+        repositories {
+            ...
+            maven { url 'https://jitpack.io' }
+        }
     }
 
 ## License
@@ -22,11 +31,7 @@ See [![javadoc](https://javadoc.io/badge2/io.flic/flic2lib-android/javadoc.svg)]
 
 # Tutorial
 
-First you need to add the library to your project. The library is hosted at JCenter and can be included in your Android app by entering the following in your `build.gradle` file:
-
-    dependencies {
-        implementation 'io.flic:flic2lib-android:1.+'
-    }
+First you need to add the library to your project, by following the instructions above.
 
 All imported classes are in the package `io.flic.flic2libandroid`. There are two classes of particular interest, `Flic2Manager` and `Flic2Button`. The singleton class `Flic2Manager` keeps track of all the buttons and `Flic2Button` represents a single button.
 
