@@ -100,16 +100,26 @@ Flic2Manager.getInstance().startScan(new Flic2ScanCallback() {
 
 If the scan times out or otherwise fails for some reason, `onComplete` will be called with an error code as result, defined in `Flic2ScanCallback` or `Flic2ButtonListener`.
 
-Before scanning however, we need to acquire the `Manifest.permission.ACCESS_FINE_LOCATION` permission by asking the user. This is due to a requirement of the Android platform in order to scan for Bluetooth Low Energy devices.
+Before scanning however, we need to acquire some runtime permission by asking the user. This is due to a requirement of the Android platform in order to scan for/connect to Bluetooth Low Energy devices.
+If targeting and running on Android 12 or higher `Manifest.permission.BLUETOOTH_SCAN` and `Manifest.permission.BLUETOOTH_CONNECT` are required. Otherwise `Manifest.permission.ACCESS_FINE_LOCATION` is required.
 In your activity, use the following code:
 
 ```java
-int permissionCheck = ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION);
-if (permissionCheck != PackageManager.PERMISSION_GRANTED) {
-    requestPermissions(new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
-    return;
+if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+    if (Build.VERSION.SDK_INT < 31) {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
+            return;
+        }
+    } else {
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED)
+        {
+            ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT}, 1);
+            return;
+        }
+    }
 }
-
 // if this line is reached, the permission was already granted and we can now start scan
 ```
 
@@ -119,10 +129,18 @@ The `requestPermissions` call will open a popup where the user must press Allow.
 @Override
 public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
     if (requestCode == 1) {
-        if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
-            // now startScan can be safely called
+        if (Build.VERSION.SDK_INT < 31) {
+            if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                // now startScan can be safely called
+            } else {
+                Toast.makeText(getApplicationContext(), "Scanning needs Location permission, which you have rejected", Toast.LENGTH_SHORT).show();
+            }
         } else {
-            Toast.makeText(getApplicationContext(), "Scanning needs Location permission, which you have rejected", Toast.LENGTH_SHORT).show();
+            if (grantResults.length >= 2 && grantResults[0] == PackageManager.PERMISSION_GRANTED && grantResults[1] == PackageManager.PERMISSION_GRANTED) {
+                // now startScan can be safely called
+            } else {
+                Toast.makeText(getApplicationContext(), "Scanning needs permissions for finding nearby devices, which you have rejected", Toast.LENGTH_SHORT).show();
+            }
         }
     }
 }

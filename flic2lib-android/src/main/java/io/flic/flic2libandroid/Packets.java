@@ -29,6 +29,9 @@ abstract class TxPacket {
 
     public static final int INIT_BUTTON_EVENTS_LIGHT_REQUEST = 23;
     public static final int SET_ADV_PARAMETERS_REQUEST = 27;
+    public static final int SET_HID_MIDI_CONFIG_DATA_IND = 28;
+    public static final int SET_HID_MIDI_CONFIG_APPLY_REQUEST = 29;
+    public static final int GET_HID_MIDI_CONFIG_REQUEST = 30;
 
 
     protected abstract void write(Writer w);
@@ -37,6 +40,7 @@ abstract class TxPacket {
         private byte[] buf;
         private int pos;
         private int bitpos;
+
         public Writer() {
             buf = new byte[256];
             pos = 1;
@@ -391,6 +395,34 @@ abstract class TxPacket {
             w.i(timeoutSeconds);
         }
     }
+
+    static class SetHidMidiConfigDataInd extends TxPacket {
+        byte[] data;
+
+        public SetHidMidiConfigDataInd(byte[] data) {
+            this.data = data;
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(SET_HID_MIDI_CONFIG_DATA_IND);
+            w.ba(data);
+        }
+    }
+
+    static class SetHidMidiConfigApplyRequest extends TxPacket {
+        @Override
+        protected void write(Writer w) {
+            w.opcode(SET_HID_MIDI_CONFIG_APPLY_REQUEST);
+        }
+    }
+
+    static class GetHidMidiConfigRequest extends TxPacket {
+        @Override
+        protected void write(Writer w) {
+            w.opcode(GET_HID_MIDI_CONFIG_REQUEST);
+        }
+    }
 }
 
 abstract class RxPacket {
@@ -419,6 +451,9 @@ abstract class RxPacket {
     public static final int GET_BATTERY_LEVEL_RESPONSE = 20;
 
     public static final int SET_ADV_PARAMETERS_RESPONSE = 25;
+    public static final int SET_HID_MIDI_CONFIG_APPLY_RESPONSE = 26;
+    public static final int GET_HID_MIDI_CONFIG_DATA_IND = 27;
+    public static final int GET_HID_MIDI_CONFIG_RESPONSE = 28;
 
     static class UnexpectedEndOfPacketException extends Exception {
 
@@ -428,6 +463,7 @@ abstract class RxPacket {
         private byte[] buf;
         private int pos;
         private int bitpos;
+
         Reader(byte[] arr) {
             buf = arr;
         }
@@ -532,6 +568,9 @@ abstract class RxPacket {
         boolean bdAddrType;
         byte[] publicKey;
         byte[] random;
+        boolean linkIsEncrypted;
+        boolean isInPublicMode;
+        boolean hasBondInfo;
 
         FullVerifyResponse1(byte[] arr) throws UnexpectedEndOfPacketException {
             super(arr);
@@ -541,6 +580,9 @@ abstract class RxPacket {
             bdAddrType = r.bool();
             publicKey = r.ba(32);
             random = r.ba(8);
+            linkIsEncrypted = r.bitBool();
+            isInPublicMode = r.bitBool();
+            hasBondInfo = r.bitBool();
             r = null;
         }
     }
@@ -724,6 +766,33 @@ abstract class RxPacket {
         GetBatteryLevelResponse(byte[] arr) throws UnexpectedEndOfPacketException {
             super(arr);
             level = r.s();
+        }
+    }
+
+    static class SetHidMidiConfigApplyResponse extends RxPacket {
+        int result;
+
+        SetHidMidiConfigApplyResponse(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            result = r.b();
+        }
+    }
+
+    static class GetHidMidiConfigDataInd extends RxPacket {
+        byte[] data;
+
+        GetHidMidiConfigDataInd(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            data = r.ba(r.left());
+        }
+    }
+
+    static class GetHidMidiConfigDataResponse extends RxPacket {
+        int result;
+
+        GetHidMidiConfigDataResponse(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            result = r.b();
         }
     }
 }

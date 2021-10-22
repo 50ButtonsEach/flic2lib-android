@@ -49,7 +49,9 @@ import java.util.UUID;
  * <p>After initialization, the singleton can betrieved using {@link #getInstance()}.
  * The utility method {@link #initAndGetInstance(Context, Handler)} can be used to combine the method calls.</p>
  *
- * <p>To pair a new Flic 2 button, first make sure the user has the ACCESS_FINE_LOCATION permission.
+ * <p>To pair a new Flic 2 button, first make sure the user has the required runtime permissions.
+ * When targeting or running on Android 11 or lower, ACCESS_FINE_LOCATION is the only required permission.
+ * For Android 12 or higher, BLUETOOTH_SCAN and BLUETOOTH_CONNECT are the required permissions.
  * See https://developer.android.com/training/permissions/requesting for a permissions tutorial.
  * Then call {@link #startScan(Flic2ScanCallback)} and implement the callbacks.</p>
  *
@@ -282,6 +284,30 @@ public class Flic2Manager {
 
             if (device != null) {
                 log(device.getAddress(), "bond state change", oldState + " -> " + newState);
+                if (newState == BluetoothDevice.BOND_BONDED) {
+                    runOnHandlerThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Flic2Button button = currentScanButton;
+                            if (button != null && button.bdAddr.equals(device.getAddress())) {
+                                FlicGattCallback cb = button.currentGattCb;
+                                if (cb != null && cb.session != null) {
+                                    cb.session.onBondComplete();
+                                }
+                            }
+                        }
+                    });
+                } else if (newState == BluetoothDevice.BOND_NONE) {
+                    runOnHandlerThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            Flic2Button button = getButtonByBdAddr(device.getAddress());
+                            if (button != null && button.wantConnected && button.currentGattCb != null) {
+                                button.currentGattCb.gatt.connect();
+                            }
+                        }
+                    });
+                }
             }
         }
     };
@@ -480,10 +506,27 @@ public class Flic2Manager {
         handler.postDelayed(stopScanRunnable, 10000);
     }
 
-    @TargetApi(Build.VERSION_CODES.M)
+    @TargetApi(31)
     private void checkScanPermission() {
-        if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-            throw new SecurityException("ACCESS_FINE_LOCATION not granted. Please call `Activity.requestPermissions(String[], int)` first.");
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (Build.VERSION.SDK_INT >= 31 && context.getApplicationInfo().targetSdkVersion >= 31) {
+                if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED || context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    throw new SecurityException("BLUETOOTH_SCAN/BLUETOOTH_CONNECT not granted. Please call `Activity.requestPermissions(String[], int)` first.");
+                }
+            } else {
+                if (context.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                    throw new SecurityException("ACCESS_FINE_LOCATION not granted. Please call `Activity.requestPermissions(String[], int)` first.");
+                }
+            }
+        }
+    }
+
+    @TargetApi(31)
+    private void checkConnectPermission() {
+        if (Build.VERSION.SDK_INT >= 31 && context.getApplicationInfo().targetSdkVersion >= 31) {
+            if (context.checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                throw new SecurityException("BLUETOOTH_CONNECT not granted. Please call `Activity.requestPermissions(String[], int)` first.");
+            }
         }
     }
 
@@ -502,9 +545,7 @@ public class Flic2Manager {
      */
     public void startScan(final Flic2ScanCallback flic2ScanCallback) {
         log("u start scan");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            checkScanPermission();
-        }
+        checkScanPermission();
         handler.post(new Runnable() {
             @Override
             public void run() {
@@ -682,6 +723,7 @@ public class Flic2Manager {
                     button.currentGattCb.socket.close();
                 } catch (IOException e) {
                 }
+                button.currentGattCb.socket = null;
             }
             button.currentGattCb.gatt.disconnect(); // Shouldn't be needed but do it anyway to workaround some buggy phones
             button.currentGattCb.gatt.close();
@@ -701,6 +743,7 @@ public class Flic2Manager {
 
     void connectButton(final Flic2Button button) {
         log(button.bdAddr, "u c");
+        checkConnectPermission();
         runOnHandlerThread(new Runnable() {
             @Override
             public void run() {
@@ -867,6 +910,9 @@ public class Flic2Manager {
             if (session != null) {
                 session.end();
             }
+            synchronized (l2CapTxQueue) {
+                l2CapTxQueue.clear();
+            }
             session = button.new Session(onL2CAP, new SessionCallback() {
                 @Override
                 public void tx(byte[] data) {
@@ -885,7 +931,7 @@ public class Flic2Manager {
                     } else {
                         synchronized (l2CapTxQueue) {
                             l2CapTxQueue.add(new Utils.Pair<>(session, data));
-                            l2CapTxQueue.notify();
+                            l2CapTxQueue.notifyAll();
                         }
                     }
                 }
@@ -894,6 +940,7 @@ public class Flic2Manager {
                 public void bond() {
                     log(button.bdAddr, "bond");
                     gatt.getDevice().createBond();
+                    currentFlic2ScanCallback.onAskToAcceptPairRequest();
                 }
 
                 @Override
@@ -909,6 +956,7 @@ public class Flic2Manager {
                             socket.close();
                         } catch (IOException e) {
                         }
+                        socket = null;
                         synchronized (l2CapTxQueue) {
                             l2CapTxQueue.clear();
                         }
@@ -959,9 +1007,17 @@ public class Flic2Manager {
             gatt.discoverServices();
         }
 
+        @TargetApi(Build.VERSION_CODES.Q)
         private void startUsingL2CAP() {
+            if (socket != null) {
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                }
+                socket = null;
+            }
             try {
-                socket = L2CapUtils.getSocket(gatt.getDevice());
+                socket = gatt.getDevice().createInsecureL2capChannel(0xfc);
                 if (socket == null) {
                     startUsingGatt();
                     return;
@@ -1084,7 +1140,7 @@ public class Flic2Manager {
                             currentSocket.close();
                         } catch (IOException e) {
                         }
-                        l2CapTxQueue.notify();
+                        l2CapTxQueue.notifyAll();
                     }
                     log(button.bdAddr, "l2cap done");
                     //Log.d(TAG, "l2cap socket thread ended");
@@ -1104,7 +1160,7 @@ public class Flic2Manager {
                     }
                     if (newState == BluetoothGatt.STATE_CONNECTED) {
                         if (status == BluetoothGatt.GATT_SUCCESS) {
-                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
                                 startUsingGatt();
                             } else {
                                 startUsingL2CAP();
@@ -1119,16 +1175,24 @@ public class Flic2Manager {
                     } else if (newState == BluetoothGatt.STATE_DISCONNECTED) {
                         state = STATE_IDLE;
                         ++disconnectCount;
+                        boolean wasBonding = false;
                         if (session != null) {
+                            wasBonding = session.isBonding();
                             session.end();
                         }
                         if (restartRunnable != null) {
                             handler.removeCallbacks(restartRunnable);
                             restartRunnable = null;
                         }
+                        // Writes submitted while the BTA thread is in disconnected state are silently dropped, without callback, so clear
+                        txQueue.clear();
                         if (button.isConnected) {
                             button.isConnected = false;
                             button.listener.onDisconnect(button);
+                            if (currentScanButton == button && wasBonding) {
+                                disconnectGatt(button);
+                                cleanupScan().onComplete(Flic2ScanCallback.RESULT_SYSTEM_PAIRING_DIALOG_NOT_ACCEPTED, 0, null);
+                            }
                         } else {
                             // Common error status codes:
                             // 128: No resources to open a new connection
@@ -1217,8 +1281,12 @@ public class Flic2Manager {
                     if (button.currentGattCb != FlicGattCallback.this) {
                         return;
                     }
-                    if (status == 0) {
-                        Utils.Pair<Flic2Button.Session, byte[]> item = txQueue.remove();
+                    if (status == BluetoothGatt.GATT_SUCCESS) {
+                        Utils.Pair<Flic2Button.Session, byte[]> item = txQueue.poll();
+                        if (item == null) {
+                            // Just in case the Bluetooth stack sends too many completions
+                            return;
+                        }
                         if (!txQueue.isEmpty()) {
                             byte[] value = txQueue.peek().b;
                             log(button.bdAddr, "wgq", value);
@@ -1252,6 +1320,10 @@ public class Flic2Manager {
         @Override
         public void onMtuChanged(final BluetoothGatt gatt, final int mtu, final int status) {
             log(button.bdAddr, "mtu", mtu + " " + status);
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                // Hopefully only happens upon disconnect
+                return;
+            }
             handler.post(new Runnable() {
                 @Override
                 public void run() {

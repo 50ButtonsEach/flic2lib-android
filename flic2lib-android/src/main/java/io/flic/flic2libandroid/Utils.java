@@ -142,7 +142,19 @@ class Utils {
         }
     }
 
-    static Pair<byte[], Integer> firmwareCheck(Context context, String uuid, int currentVersion) {
+    static class FirmwareCheckResult {
+        boolean alreadyUpdated;
+        byte[] data;
+        int nextCheckInMinutes;
+
+        public FirmwareCheckResult(boolean alreadyUpdated, byte[] data, int nextCheckInMinutes) {
+            this.alreadyUpdated = alreadyUpdated;
+            this.data = data;
+            this.nextCheckInMinutes = nextCheckInMinutes;
+        }
+    }
+
+    static FirmwareCheckResult firmwareCheck(Context context, String uuid, int currentVersion) {
         String packageName = context.getPackageName();
         String packageVersion;
         try {
@@ -184,7 +196,7 @@ class Utils {
             }
             int responseCode = conn.getResponseCode();
             if (responseCode != 200) {
-                return new Pair<>(null, 60);
+                return new FirmwareCheckResult(false, null, 60);
             }
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
                 StringBuilder sb = new StringBuilder();
@@ -195,19 +207,19 @@ class Utils {
                 String response = sb.toString();
                 if (response.equals("null")) {
                     // Already latest version
-                    return new Pair<>(null, 24 * 60);
+                    return new FirmwareCheckResult(true, null, 24 * 60);
                 }
                 try {
                     JSONObject obj = new JSONObject(response);
                     //String firmwareVersion = obj.getString("firmware_version");
                     firmwareDownloadUrl = obj.getString("firmware_download_url");
                 } catch (JSONException e) {
-                    return new Pair<>(null, 24 * 60);
+                    return new FirmwareCheckResult(false, null, 24 * 60);
                 }
             }
         } catch (IOException e) {
             e.printStackTrace();
-            return new Pair<>(null, 120);
+            return new FirmwareCheckResult(false, null, 120);
         } finally {
             if (conn != null) {
                 conn.disconnect();
@@ -215,10 +227,10 @@ class Utils {
         }
 
         try {
-            return new Pair<>(downloadFirmware(firmwareDownloadUrl), 20);
+            return new FirmwareCheckResult(false, downloadFirmware(firmwareDownloadUrl), 20);
         } catch (IOException e) {
             e.printStackTrace();
-            return new Pair<>(null, 20);
+            return new FirmwareCheckResult(false, null, 20);
         }
     }
 

@@ -22,7 +22,7 @@ abstract class ScanWrapper {
     public abstract void startScan(BluetoothAdapter adapter, UUID uuid, Callback cb);
     public abstract void stopScan(BluetoothAdapter adapter, Callback cb);
 
-    public static ScanWrapper INSTANCE = Build.VERSION.SDK_INT >= 21 ? new LollipopScanWrapper() : new PreLollipopScanWrapper();
+    public static ScanWrapper INSTANCE = Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1 ? new LollipopScanWrapper() : new PreLollipopScanWrapper();
 
     public static abstract class Callback {
         private Object mAndroidCb;

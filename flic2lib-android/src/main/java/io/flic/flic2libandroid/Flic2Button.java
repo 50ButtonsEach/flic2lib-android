@@ -1,5 +1,7 @@
 package io.flic.flic2libandroid;
 
+import android.bluetooth.BluetoothDevice;
+
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
@@ -153,6 +155,13 @@ public class Flic2Button {
         }
 
         @Override
+        public void onFirmwareVersionCheckComplete(Flic2Button button, boolean checkSuccess, boolean hasNewVersion) {
+            for (Flic2ButtonListener listener : listeners) {
+                listener.onFirmwareVersionCheckComplete(button, checkSuccess, hasNewVersion);
+            }
+        }
+
+        @Override
         public void onFirmwareVersionUpdated(Flic2Button button, int newVersion) {
             for (Flic2ButtonListener listener : listeners) {
                 listener.onFirmwareVersionUpdated(button, newVersion);
@@ -201,6 +210,8 @@ public class Flic2Button {
      * <p>This state is exited by calling the {@link #disconnectOrAbortPendingConnection()} method.</p>
      *
      * <p>If the button already is in this state, or {@link #isUnpaired()} is true, this method does nothing.</p>
+     *
+     * <p>When targeting and running on Android 12 or higher, the BLUETOOTH_CONNECT runtime permission is required.</p>
      */
     public void connect() {
         manager.connectButton(this);
@@ -479,6 +490,91 @@ public class Flic2Button {
     }
 
     /**
+     * Sets a new hid midi config.
+     *
+     * <p>The button must have firmware version at least version 9, and the button must be connected and ready.</p>
+     *
+     * @param config   The config blob
+     * @param callback Will be called when the operation completes (no callback if button disconnects before completion)
+     */
+    public void setHidMidiConfig(final byte[] config, final SetHidMidiConfigCallback callback) {
+        if (callback == null) {
+            throw new IllegalArgumentException("callback is null");
+        }
+        manager.handler.post(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        if (Flic2Button.this.firmwareVersion >= 9) {
+                            s.setHidMidiConfig(config, callback);
+                        } else {
+                            callback.onResult(SetHidMidiConfigCallback.INCOMPATIBLE_FIRMWARE_VERSION);
+                        }
+                        return;
+                    }
+                }
+                callback.onResult(SetHidMidiConfigCallback.NOT_READY);
+            }
+        });
+    }
+
+    /**
+     * Gets the current hid midi config.
+     *
+     * <p>The button must have firmware version at least version 9, and the button must be connected and ready.</p>
+     *
+     * @param callback Will be called when the operation completes (no callback if button disconnects before completion)
+     */
+    public void getHidMidiConfig(final GetHidMidiConfigCallback callback) {
+        if (callback == null) {
+            throw new IllegalArgumentException("callback is null");
+        }
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        if (Flic2Button.this.firmwareVersion >= 9) {
+                            s.getHidMidiConfig(callback);
+                        } else {
+                            callback.onResult(GetHidMidiConfigCallback.INCOMPATIBLE_FIRMWARE_VERSION, null);
+                        }
+                        return;
+                    }
+                }
+                callback.onResult(GetHidMidiConfigCallback.NOT_READY, null);
+            }
+        });
+    }
+
+    /**
+     * Triggers an immediate firmware update.
+     *
+     * <p>If the button is ready and is responding, the callback {@link Flic2ButtonListener#onFirmwareVersionCheckComplete(Flic2Button, boolean, boolean)}
+     * will be called shortly after this function is called. If a new version is to be updated, {@link Flic2ButtonListener#onFirmwareVersionUpdated(Flic2Button, int)}
+     * will then be called when the update completes successfully.</p>
+     *
+     * <p>Note that a firmware update check will be performed once per 24 hours, even if this method is not called.</p>
+     */
+    public void triggerFirmwareUpdate() {
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        nextFirmwareCheckTimestamp = Long.MIN_VALUE;
+                        currentGattCb.getSession().checkFirmwareTimer();
+                    }
+                }
+            }
+        });
+    }
+
+    /**
      * Gets a string representation.
      *
      * <p>Should only be used for debug purposes.</p>
@@ -492,13 +588,14 @@ public class Flic2Button {
 
     class Session {
         private static final int STATE_WAIT_FULL_VERIFY1 = 0;
-        private static final int STATE_WAIT_FULL_VERIFY2 = 1;
-        private static final int STATE_WAIT_QUICK_VERIFY = 2;
-        private static final int STATE_SESSION_ESTABLISHED = 3;
-        private static final int STATE_WAIT_FULL_VERIFY1_TEST_UNPAIRED = 4;
-        private static final int STATE_WAIT_TEST_IF_REALLY_UNPAIRED_RESPONSE = 5;
-        private static final int STATE_FAILED = 10;
-        private static final int STATE_ENDED = 11;
+        private static final int STATE_BONDING = 1;
+        private static final int STATE_WAIT_FULL_VERIFY2 = 2;
+        private static final int STATE_WAIT_QUICK_VERIFY = 3;
+        private static final int STATE_SESSION_ESTABLISHED = 4;
+        private static final int STATE_WAIT_FULL_VERIFY1_TEST_UNPAIRED = 5;
+        private static final int STATE_WAIT_TEST_IF_REALLY_UNPAIRED_RESPONSE = 6;
+        private static final int STATE_FAILED = 7;
+        private static final int STATE_ENDED = 8;
 
         private static final int FW_UPDATE_STATE_IDLE = 0;
         private static final int FW_UPDATE_STATE_GETTING_BUTTON_VERSION = 1;
@@ -522,6 +619,8 @@ public class Flic2Button {
         private int connId;
         private boolean useQuickVerify;
         private byte[] pendingRxPacket;
+        private byte[] myPublicKey;
+        private byte[] clientRandomBytes;
         private byte[] fullVerifySharedSecret;
         private boolean tmpBdAddressType;
         private long rxCounter;
@@ -542,6 +641,10 @@ public class Flic2Button {
 
         private Runnable batteryCheckTimerRunnable;
 
+        private SetHidMidiConfigCallback setHidMidiConfigCallback;
+        private byte[] getHidMidiBuffer;
+        private GetHidMidiConfigCallback getHidMidiConfigCallback;
+
         Session(boolean onL2CAP, SessionCallback sessionCallback) {
             this.onL2CAP = onL2CAP;
             this.sessionCallback = sessionCallback;
@@ -561,6 +664,10 @@ public class Flic2Button {
 
         public boolean isEstablished() {
             return state == STATE_SESSION_ESTABLISHED;
+        }
+
+        public boolean isBonding() {
+            return state == STATE_BONDING;
         }
 
         public void tx(byte[] data) {
@@ -715,6 +822,27 @@ public class Flic2Button {
             sendSignedPacket(new TxPacket.SetAutoDisconnectTimeInd(Flic2Button.this.autoDisconnectTime));
         }
 
+        private void setHidMidiConfig(byte[] data, SetHidMidiConfigCallback callback) {
+            if (setHidMidiConfigCallback != null) {
+                callback.onResult(SetHidMidiConfigCallback.ALREADY_IN_PROGRESS);
+                return;
+            }
+            setHidMidiConfigCallback = callback;
+            for (int i = 0; i < data.length; i += 120) {
+                sendSignedPacket(new TxPacket.SetHidMidiConfigDataInd(Arrays.copyOfRange(data, i, Math.min(i + 120, data.length))));
+            }
+            sendSignedRequest(new TxPacket.SetHidMidiConfigApplyRequest());
+        }
+
+        private void getHidMidiConfig(GetHidMidiConfigCallback callback) {
+            if (getHidMidiConfigCallback != null) {
+                callback.onResult(GetHidMidiConfigCallback.ALREADY_IN_PROGRESS, null);
+                return;
+            }
+            getHidMidiConfigCallback = callback;
+            sendSignedRequest(new TxPacket.GetHidMidiConfigRequest());
+        }
+
         private void onGotName(String name) {
             nameRequestPending = false;
             if (shouldResendNameRequest) {
@@ -766,28 +894,31 @@ public class Flic2Button {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    final Utils.Pair<byte[], Integer> result = Utils.firmwareCheck(manager.context, Flic2Button.this.uuid, newVersion);
+                    final Utils.FirmwareCheckResult result = Utils.firmwareCheck(manager.context, Flic2Button.this.uuid, newVersion);
                     manager.runOnHandlerThread(new Runnable() {
                         @Override
                         public void run() {
                             if (state != STATE_SESSION_ESTABLISHED || firmwareUpdateState != FW_UPDATE_STATE_DOWNLOADING_FIRMWARE) {
                                 return;
                             }
-                            if (result.a != null && result.a.length < 1000) {
-                                result.a = null;
-                                result.b = 24*60;
+                            if (result.data != null && result.data.length < 1000) {
+                                result.data = null;
+                                result.nextCheckInMinutes = 24 * 60;
                             }
-                            if (result.a == null) {
+                            if (result.data == null) {
                                 firmwareUpdateState = FW_UPDATE_STATE_IDLE;
-                                Flic2Button.this.nextFirmwareCheckTimestamp = System.currentTimeMillis() + (long)result.b * 60 * 1000;
+                                Flic2Button.this.nextFirmwareCheckTimestamp = System.currentTimeMillis() + (long)result.nextCheckInMinutes * 60 * 1000;
                                 manager.database.updateFirmwareCheckTimestamp(Flic2Button.this);
                                 checkFirmwareTimer();
                             } else {
-                                byte[] iv = Arrays.copyOf(result.a, 8);
-                                byte[] data = Arrays.copyOfRange(result.a, 8, result.a.length);
+                                byte[] iv = Arrays.copyOf(result.data, 8);
+                                byte[] data = Arrays.copyOfRange(result.data, 8, result.data.length);
                                 firmwareUpdateState = FW_UPDATE_STATE_IDLE;
                                 performFirmwareUpdate(data, iv);
                             }
+                            boolean checkSuccess = result.alreadyUpdated || result.data != null;
+                            boolean hasNewVersion = result.data != null;
+                            listener.onFirmwareVersionCheckComplete(Flic2Button.this, checkSuccess, hasNewVersion);
                         }
                     });
                 }
@@ -848,6 +979,21 @@ public class Flic2Button {
             firmwareUpdateData = data;
             sendSignedRequest(new TxPacket.StartFirmwareUpdateRequest(data.length / 4, iv, 60));
             firmwareUpdateState = FW_UPDATE_STATE_STARTING_UPDATE;
+        }
+
+        public void onBondComplete() {
+            if (state == STATE_BONDING) {
+                byte[] verifier = Arrays.copyOf(Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'A', 'T'}), 16);
+
+                TxPacket.FullVerifyRequest2WithoutAppToken req = new TxPacket.FullVerifyRequest2WithoutAppToken();
+                req.ecdhPublicKey = myPublicKey;
+                req.randomBytes = clientRandomBytes;
+                req.verifier = verifier;
+                sendUnsignedPacket(req);
+
+                chaskeyKeys = Flic2Crypto.chaskeyGenerateSubkeys(Arrays.copyOf(Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'S', 'K'}), 16));
+                state = STATE_WAIT_FULL_VERIFY2;
+            }
         }
 
         public void onData(byte[] value) {
@@ -933,9 +1079,9 @@ public class Flic2Button {
                     }
                     byte[] fullVerifySecretKey = new byte[32];
                     Utils.secureRandom.nextBytes(fullVerifySecretKey);
-                    byte[] myPublicKey = Flic2Crypto.curve25519Base(fullVerifySecretKey);
+                    myPublicKey = Flic2Crypto.curve25519Base(fullVerifySecretKey);
                     byte[] sharedSecret = Flic2Crypto.curve25519(p.publicKey, fullVerifySecretKey);
-                    byte[] clientRandomBytes = new byte[8];
+                    clientRandomBytes = new byte[8];
                     Utils.secureRandom.nextBytes(clientRandomBytes);
                     byte[] flags = new byte[1];
                     MessageDigest md = Utils.createSha256();
@@ -947,18 +1093,17 @@ public class Flic2Button {
                     fullVerifySharedSecret = md.digest();
 
                     if (state == STATE_WAIT_FULL_VERIFY1) {
-                        sessionCallback.bond();
-
-                        byte[] verifier = Arrays.copyOf(Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'A', 'T'}), 16);
-
-                        TxPacket.FullVerifyRequest2WithoutAppToken req = new TxPacket.FullVerifyRequest2WithoutAppToken();
-                        req.ecdhPublicKey = myPublicKey;
-                        req.randomBytes = clientRandomBytes;
-                        req.verifier = verifier;
-                        sendUnsignedPacket(req);
-
-                        chaskeyKeys = Flic2Crypto.chaskeyGenerateSubkeys(Arrays.copyOf(Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'S', 'K'}), 16));
-                        state = STATE_WAIT_FULL_VERIFY2;
+                        if (!p.isInPublicMode) {
+                            state = STATE_FAILED;
+                            listener.onFailure(Flic2Button.this, Flic2ButtonListener.FAILURE_BUTTON_NOT_IN_PAIRABLE_MODE, 0);
+                            return;
+                        }
+                        state = STATE_BONDING;
+                        if (manager.adapter.getRemoteDevice(bdAddr).getBondState() != BluetoothDevice.BOND_BONDED) {
+                            sessionCallback.bond();
+                        } else {
+                            onBondComplete();
+                        }
                     } else {
                         Mac hmac = Utils.createHmacSha256(fullVerifySharedSecret);
                         hmac.update(new byte[]{'P', 'T'});
@@ -1323,13 +1468,13 @@ public class Flic2Button {
                         // Button automatically reboots when disconnected after fw update
                         sendSignedPacket(new TxPacket.ForceBtDisconnectInd(true));
                         firmwareUpdateState = FW_UPDATE_STATE_DONE;
-                        Flic2Button.this.nextFirmwareCheckTimestamp = System.currentTimeMillis() + 60*1000;
+                        Flic2Button.this.nextFirmwareCheckTimestamp = System.currentTimeMillis() + 5 * 1000;
                         manager.database.updateFirmwareCheckTimestamp(Flic2Button.this);
                     } else if (firmwareUpdateAckPos == 0) {
                         firmwareUpdateData = null;
                         System.err.println("Invalid signature");
                         firmwareUpdateState = FW_UPDATE_STATE_IDLE;
-                        Flic2Button.this.nextFirmwareCheckTimestamp = System.currentTimeMillis() + 24*60*60*1000;
+                        Flic2Button.this.nextFirmwareCheckTimestamp = System.currentTimeMillis() + 24 * 60 * 60 * 1000;
                         manager.database.updateFirmwareCheckTimestamp(Flic2Button.this);
                         checkFirmwareTimer();
                     } else {
@@ -1380,6 +1525,42 @@ public class Flic2Button {
                     responseReceived();
                     advSettingsConfigured = true;
                     manager.database.updateAdvSettingsConfigured(Flic2Button.this);
+                    return;
+                }
+
+                if (opcode == RxPacket.SET_HID_MIDI_CONFIG_APPLY_RESPONSE && pkt.length >= 1) {
+                    responseReceived();
+                    RxPacket.SetHidMidiConfigApplyResponse rsp = new RxPacket.SetHidMidiConfigApplyResponse(pkt);
+                    if (setHidMidiConfigCallback != null) {
+                        SetHidMidiConfigCallback callback = setHidMidiConfigCallback;
+                        setHidMidiConfigCallback = null;
+                        callback.onResult(rsp.result);
+                    }
+                    return;
+                }
+
+                if (opcode == RxPacket.GET_HID_MIDI_CONFIG_DATA_IND) {
+                    RxPacket.GetHidMidiConfigDataInd data = new RxPacket.GetHidMidiConfigDataInd(pkt);
+                    if (getHidMidiConfigCallback != null) {
+                        if (getHidMidiBuffer == null) {
+                            getHidMidiBuffer = data.data;
+                        } else if (getHidMidiBuffer.length + data.data.length < 1024) {
+                            getHidMidiBuffer = Utils.concatArrays(getHidMidiBuffer, data.data);
+                        }
+                    }
+                    return;
+                }
+
+                if (opcode == RxPacket.GET_HID_MIDI_CONFIG_RESPONSE && pkt.length >= 1) {
+                    responseReceived();
+                    RxPacket.GetHidMidiConfigDataResponse rsp = new RxPacket.GetHidMidiConfigDataResponse(pkt);
+                    if (getHidMidiConfigCallback != null) {
+                        GetHidMidiConfigCallback callback = getHidMidiConfigCallback;
+                        byte[] data = getHidMidiBuffer;
+                        getHidMidiConfigCallback = null;
+                        getHidMidiBuffer = null;
+                        callback.onResult(rsp.result, rsp.result == 0 ? data : null);
+                    }
                     return;
                 }
             } catch (RxPacket.UnexpectedEndOfPacketException ex) {

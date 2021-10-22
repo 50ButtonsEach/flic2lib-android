@@ -52,6 +52,11 @@ public interface Flic2ScanCallback {
     int RESULT_FAILED_VERIFY_TIMED_OUT = 7;
 
     /**
+     * Failure that happens when the system pairing dialog is not accepted.
+     */
+    int RESULT_SYSTEM_PAIRING_DIALOG_NOT_ACCEPTED = 8;
+
+    /**
      * Called when the user holds down a button that is already paired to the manager.
      *
      * This will be called at most one time per button per scan.
@@ -77,6 +82,15 @@ public interface Flic2ScanCallback {
      * The next callback will be {@link #onComplete(int, int, Flic2Button)}.
      */
     void onConnected();
+
+    /**
+     * Called when a system-level Bluetooth pairing request has been initiated.
+     *
+     * At this point you should display a text in the app saying "Please press Pair & Connect to continue".
+     * The next callback will be {@link #onComplete(int, int, Flic2Button)}.
+     */
+    default void onAskToAcceptPairRequest() {
+    }
 
     /**
      * Called when the scanning has finished for any reason, unless scanning was explicitly stopped.

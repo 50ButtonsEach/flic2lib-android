@@ -165,12 +165,23 @@ public class Flic2ButtonListener {
     public void onNameUpdated(Flic2Button button, String newName) {
     }
 
+
+    /**
+     * Called when a firmware version check to the Flic 2 backend has been made.
+     *
+     * @param button        The {@link Flic2Button} that fired the event.
+     * @param checkSuccess  The request to the backend succeeded
+     * @param hasNewVersion The result indicates that the button shall update to a new version
+     */
+    public void onFirmwareVersionCheckComplete(Flic2Button button, boolean checkSuccess, boolean hasNewVersion) {
+    }
+
     /**
      * Firmware version was updated.
      *
      * <p>Called when the button has reported another version than was knew before.</p>
      *
-     * @param button The {@link Flic2Button} that fired the event.
+     * @param button     The {@link Flic2Button} that fired the event.
      * @param newVersion The new version.
      */
     public void onFirmwareVersionUpdated(Flic2Button button, int newVersion) {
