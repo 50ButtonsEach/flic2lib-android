@@ -86,7 +86,7 @@ public interface Flic2ScanCallback {
     /**
      * Called when a system-level Bluetooth pairing request has been initiated.
      *
-     * At this point you should display a text in the app saying "Please press Pair & Connect to continue".
+     * At this point you should display a text in the app saying "Please press Pair &amp; Connect to continue".
      * The next callback will be {@link #onComplete(int, int, Flic2Button)}.
      */
     default void onAskToAcceptPairRequest() {
