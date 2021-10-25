@@ -21,6 +21,8 @@ If you have not already done so, include the JitPack repository in your root `bu
         }
     }
 
+
+
 ## License
 
 See [License.txt](License.txt).
@@ -101,12 +103,12 @@ Flic2Manager.getInstance().startScan(new Flic2ScanCallback() {
 If the scan times out or otherwise fails for some reason, `onComplete` will be called with an error code as result, defined in `Flic2ScanCallback` or `Flic2ButtonListener`.
 
 Before scanning however, we need to acquire some runtime permission by asking the user. This is due to a requirement of the Android platform in order to scan for/connect to Bluetooth Low Energy devices.
-If targeting and running on Android 12 or higher `Manifest.permission.BLUETOOTH_SCAN` and `Manifest.permission.BLUETOOTH_CONNECT` are required. Otherwise `Manifest.permission.ACCESS_FINE_LOCATION` is required.
+If targeting and running on Android 12 or higher, `Manifest.permission.BLUETOOTH_SCAN` and `Manifest.permission.BLUETOOTH_CONNECT` are required. Otherwise `Manifest.permission.ACCESS_FINE_LOCATION` is required.
 In your activity, use the following code:
 
 ```java
 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-    if (Build.VERSION.SDK_INT < 31) {
+    if (Build.VERSION.SDK_INT < 31 || getApplicationInfo().targetSdkVersion < 31) {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.ACCESS_FINE_LOCATION}, 1);
             return;
@@ -128,8 +130,9 @@ The `requestPermissions` call will open a popup where the user must press Allow.
 ```java
 @Override
 public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults);
     if (requestCode == 1) {
-        if (Build.VERSION.SDK_INT < 31) {
+        if (Build.VERSION.SDK_INT < 31 || getApplicationInfo().targetSdkVersion < 31) {
             if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                 // now startScan can be safely called
             } else {
@@ -174,7 +177,41 @@ The button listener has the events `onConnected`, `onReady` and `onDisconnected`
 
 The callback `onUnpaired` should also be implemented, which will be called if the button has been factory reset. From that point the button is removed and detached from the library, and the button object cannot be used anymore. To add it back, the user must re-scan the button.
 
-To get a list of all paired buttons (usually at application startup), use the method `getButtons` on the manager object. All paired buttons are saved to disk in an internal database file, so the pairings remain even if the Android device is restarted. When the application starts, the buttons are always in the disconnected state, and you need to explicitly call `connect` on the buttons you want connected.
+To get a list of all paired buttons (usually at application startup), use the method `getButtons` on the manager object. All paired buttons are saved to disk in an internal database file, so the pairings remain even if the Android device is restarted. When the application starts, the buttons are always in the disconnected state, and you need to explicitly call `connect` on the buttons you want connected. With a newly paired button (as delivered by `onComplete`) however, you don't need to call `connect` since it is already connected at that point.
+
+## API versioning and manifest permissions
+
+The way Android handles Bluetooth permissions has changed in API 31 (Android 12). Previously, `ACCESS_FINE_LOCATION` (runtime permission) was required to scan new Bluetooth devices and `BLUETOOTH` and `BLUETOOTH_ADMIN` (install-time permissions) were required to pair and connect to devices. The `BLUETOOTH` and `BLUETOOTH_ADMIN` permissions are entirely removed in API 31 and have been replaced by `BLUETOOTH_CONNECT`. The `ACCESS_FINE_LOCATION` permission is not used for Bluetooth scanning anymore but is still used for GPS for example.
+
+When targeting API 31 or higher, this library will automatically insert the required permissions into the application's manifest so that it works on both older devices as well as those running Android 12 or higher. Unfortunately, the XML structure is not expressive enough to automatically handle situations when your app has different requirements, such as targeting a lower API version than 31 or using location permissions for other situations. Therefore you might need to change the manifest as described below.
+
+The options below need the `xmlns:tools="http://schemas.android.com/tools"` attribute added to the `<manifest>` tag in order to work.
+
+When targeting API 30 (Android 11) or lower, the following lines must be added directly inside the `<manifest>` tag:
+
+```xml
+<uses-permission android:name="android.permission.BLUETOOTH" tools:remove="maxSdkVersion" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" tools:remove="maxSdkVersion" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:remove="maxSdkVersion" />
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:node="remove" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />
+```
+
+When targeting API 31 or higher and the app also uses Bluetooth scanning for location purposes (such as scanning for Bluetooth "beacons"), add the following line directly inside the `<manifest>` tag:
+
+```xml
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:remove="android:usesPermissionFlags" />
+```
+
+When targeting API 31 or higher and the app needs the `ACCESS_FINE_LOCATION` permission for any purpose other than Bluetooth scanning, add the following line directly inside the `<manifest>` tag:
+
+```xml
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:remove="maxSdkVersion" />
+```
+
+## Upgrading to or using API 31 (Android 12)
+
+When targeting API 31 or later, in order to connect to Bluetooth devices (such as Flic 2), the runtime permission `BLUETOOTH_CONNECT` must have been granted. If this permission is not granted, the `connect` method on a `Flic2Button` will throw a `SecurityException`. This can happen in particular when the app is updated when previously targeting API 30 or lower, or when the user revokes the app's permission in the system settings. The possibility of these situations must be taken into account when upgrading the target API for your app. One idea is to show a dialog on app startup if the `BLUETOOTH_CONNECT` permission is not granted, and ask the user to grant it at that point.
 
 # Background execution
 
@@ -191,7 +228,7 @@ public class Flic2SampleService extends Service {
         super.onCreate();
 
         Intent notificationIntent = new Intent(this, MainActivity.class);
-        PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_CANCEL_CURRENT);
+        PendingIntent contentIntent = PendingIntent.getActivity(this, 0, notificationIntent, PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_IMMUTABLE);
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel mChannel = new NotificationChannel(NOTIFICATION_CHANNEL_ID, NOTIFICATION_CHANNEL_NAME, NotificationManager.IMPORTANCE_LOW);
@@ -267,6 +304,7 @@ And register the receivers in the manifest inside the `<application>` tag:
 <receiver
     android:name=".Flic2SampleService$BootUpReceiver"
     android:enabled="true"
+    android:exported="false"
     android:permission="android.permission.RECEIVE_BOOT_COMPLETED">
     <intent-filter>
         <action android:name="android.intent.action.BOOT_COMPLETED" />
@@ -276,7 +314,8 @@ And register the receivers in the manifest inside the `<application>` tag:
 
 <receiver
     android:name=".Flic2SampleService$UpdateReceiver"
-    android:enabled="true">
+    android:enabled="true"
+    android:exported="false">
     <intent-filter>
         <action android:name="android.intent.action.PACKAGE_REPLACED" />
         <data
