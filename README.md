@@ -89,6 +89,11 @@ Flic2Manager.getInstance().startScan(new Flic2ScanCallback() {
     }
 
     @Override
+    public void onAskToAcceptPairRequest() {
+        // Inform the user to press "Pair & Connect" in the system dialog that appears.
+    }
+
+    @Override
     public void onComplete(int result, int subCode, Flic2Button button) {
         if (result == Flic2ScanCallback.RESULT_SUCCESS) {
             // Success!
