@@ -575,6 +575,20 @@ public class Flic2Button {
     }
 
     /**
+     * Exports the pairing key.
+     *
+     * <p>This is to be used in case a button pairing should be imported into Flic Hub SDK or Flic Device Manager.</p>
+     *
+     * @return Pairing key
+     */
+    public byte[] exportPairingKey() {
+        if (pairingData == null) {
+            return null;
+        }
+        return Utils.concatArrays(Utils.intToBytes(pairingData.identifier), pairingData.key);
+    }
+
+    /**
      * Gets a string representation.
      *
      * <p>Should only be used for debug purposes.</p>
