@@ -188,27 +188,17 @@ To get a list of all paired buttons (usually at application startup), use the me
 
 The way Android handles Bluetooth permissions has changed in API 31 (Android 12). Previously, `ACCESS_FINE_LOCATION` (runtime permission) was required to scan new Bluetooth devices and `BLUETOOTH` and `BLUETOOTH_ADMIN` (install-time permissions) were required to pair and connect to devices. The `BLUETOOTH` and `BLUETOOTH_ADMIN` permissions are entirely removed in API 31 and have been replaced by `BLUETOOTH_CONNECT`. The `ACCESS_FINE_LOCATION` permission is not used for Bluetooth scanning anymore but is still used for GPS for example.
 
-When targeting API 31 or higher, this library will automatically insert the required permissions into the application's manifest so that it works on both older devices as well as those running Android 12 or higher. Unfortunately, the XML structure is not expressive enough to automatically handle situations when your app has different requirements, such as targeting a lower API version than 31 or using location permissions for other situations. Therefore you might need to change the manifest as described below.
+This library will automatically insert the required permissions into the application's manifest so that it works on both older devices as well as those running Android 12 or higher. Unfortunately, the XML structure is not expressive enough to automatically handle situations when your app has different requirements, such as scanning for Bluetooth "beacons" or using location permissions for other situations. Therefore you might need to change the manifest as described below.
 
-The options below need the `xmlns:tools="http://schemas.android.com/tools"` attribute added to the `<manifest>` tag in order to work.
+The options below need the `xmlns:tools="http://schemas.android.com/tools"` attribute added to the `<manifest>` tag in order to work. Please note that the `tools:remove` attribute in the code snippets below is essential and must be present, since this attribute overrides the default value set by this library.
 
-When targeting API 30 (Android 11) or lower, the following lines must be added directly inside the `<manifest>` tag:
-
-```xml
-<uses-permission android:name="android.permission.BLUETOOTH" tools:remove="maxSdkVersion" />
-<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" tools:remove="maxSdkVersion" />
-<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:remove="maxSdkVersion" />
-<uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:node="remove" />
-<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" tools:node="remove" />
-```
-
-When targeting API 31 or higher and the app also uses Bluetooth scanning for location purposes (such as scanning for Bluetooth "beacons"), add the following line directly inside the `<manifest>` tag:
+When the app also uses Bluetooth scanning for location purposes (such as scanning for Bluetooth "beacons"), add the following line directly inside the `<manifest>` tag:
 
 ```xml
 <uses-permission android:name="android.permission.BLUETOOTH_SCAN" tools:remove="android:usesPermissionFlags" />
 ```
 
-When targeting API 31 or higher and the app needs the `ACCESS_FINE_LOCATION` permission for any purpose other than Bluetooth scanning, add the following line directly inside the `<manifest>` tag:
+When the app needs the `ACCESS_FINE_LOCATION` permission for any purpose other than Bluetooth scanning, add the following line directly inside the `<manifest>` tag:
 
 ```xml
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:remove="maxSdkVersion" />
