@@ -1,18 +1,17 @@
 plugins {
     id "maven-publish"
+    id "com.android.library"
 }
-
-apply plugin: 'com.android.library'
 
 group = 'io.flic'
 version = '1.3.2'
 
 android {
-    compileSdkVersion 34
+    compileSdkVersion 36
 
     defaultConfig {
         minSdkVersion 19
-        targetSdkVersion 33
+        targetSdkVersion 36
         versionName '1.3.2'
         buildConfigField("String", "VERSION_NAME", "\"1.3.2\"")
 
@@ -26,6 +25,11 @@ android {
         }
     }
 
+    buildFeatures {
+        buildConfig = true
+    }
+
+    namespace "io.flic.flic2libandroid"
 }
 
 dependencies {
