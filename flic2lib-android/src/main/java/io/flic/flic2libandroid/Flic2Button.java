@@ -71,7 +71,7 @@ public class Flic2Button {
     boolean unpaired;
     boolean advSettingsConfigured;
     int bootId;
-    int eventCount;
+    int[] eventCount = new int[2];
     long readyTimestamp;
     Float lastKnownBatteryVoltage;
     Long lastKnownBatteryTimestampUtcMs;
@@ -148,6 +148,39 @@ public class Flic2Button {
         }
 
         @Override
+        public void onButtonEvent(Flic2Button button, Flic2ButtonEvent event) {
+            for (Flic2ButtonListener listener : listeners) {
+                if (event.getButtonNumber() == 0) {
+                    switch (event.getEventClass()) {
+                        case Flic2ButtonEvent.EVENT_CLASS_UP_OR_DOWN:
+                            listener.onButtonUpOrDown(button, event.getWasQueued(), event.isLastQueued(), event.getTimestamp(),
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_UP,
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_DOWN);
+                            break;
+                        case Flic2ButtonEvent.EVENT_CLASS_CLICK_OR_HOLD:
+                            listener.onButtonClickOrHold(button, event.getWasQueued(), event.isLastQueued(), event.getTimestamp(),
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_CLICK,
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_HOLD);
+                            break;
+                        case Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK:
+                            listener.onButtonSingleOrDoubleClick(button, event.getWasQueued(), event.isLastQueued(), event.getTimestamp(),
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK,
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_DOUBLE_CLICK);
+                            break;
+                        case Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD:
+                            listener.onButtonSingleOrDoubleClickOrHold(button, event.getWasQueued(), event.isLastQueued(), event.getTimestamp(),
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK,
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_DOUBLE_CLICK,
+                                    event.getEventType() == Flic2ButtonEvent.EVENT_TYPE_HOLD);
+                            break;
+                    }
+                }
+
+                listener.onButtonEvent(button, event);
+            }
+        }
+
+        @Override
         public void onNameUpdated(Flic2Button button, String newName) {
             for (Flic2ButtonListener listener : listeners) {
                 listener.onNameUpdated(button, newName);
@@ -179,6 +212,13 @@ public class Flic2Button {
         public void onAllQueuedButtonEventsProcessed(Flic2Button button) {
             for (Flic2ButtonListener listener : listeners) {
                 listener.onAllQueuedButtonEventsProcessed(button);
+            }
+        }
+
+        @Override
+        public void onDuoPushTwistNotification(FlicDuoPushTwistNotificationButtonInfo[] buttonInfo, int angleDiff) {
+            for (Flic2ButtonListener listener : listeners) {
+                listener.onDuoPushTwistNotification(buttonInfo, angleDiff);
             }
         }
     };
@@ -397,6 +437,38 @@ public class Flic2Button {
     }
 
     /**
+     * Enables the Push-Twist feature for Flic Duo.
+     *
+     * <p>This feature must be re-enabled every time the button reconnects
+     * after {@link Flic2ButtonListener#onReady(Flic2Button, long)} has been received.</p>
+     *
+     * @param bigButton If it should be enabled for the big button.
+     * @param smallButton If it should be enabled for the small button.
+     */
+    public void enableDuoPushTwist(boolean bigButton, boolean smallButton) {
+        byte mask = (byte) ((bigButton ? 1 : 0) | (smallButton ? 2 : 0));
+
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (unpaired) {
+                    return;
+                }
+
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished() && s.isDuo) {
+                        if (s.duoPushTwistMask != mask) {
+                            s.duoPushTwistMask = mask;
+                            s.sendEnablePushTwistInd();
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /**
      * Gets the firmware version.
      *
      * @return the firmware version
@@ -468,7 +540,30 @@ public class Flic2Button {
      * @return The press count
      */
     public int getPressCount() {
-        return (eventCount + 1) / 2;
+        return (eventCount[0] + 1) / 2;
+    }
+
+    /**
+     * Gets press count for Flic Duo.
+     *
+     * <p>This property specifies how many times the button has been
+     * toggled at any given time since boot. This will register all down events
+     * as well as the up events, which means that if you want to
+     * know how many times it has been clicked then you have to
+     * divide this number by two. Also, this property will always
+     * contain the last known registered value, meaning that if
+     * the button has been pressed while not being within proximity
+     * then the property will of course not be up to date. It will
+     * be updated as soon as the button connects the next time.</p>
+     *
+     * @return The press count
+     * @param buttonNumber 0 is for the big button and 1 is for the small button on Flic Duo
+     */
+    public int getPressCount(int buttonNumber) {
+        if (buttonNumber < 0 || buttonNumber > 1) {
+            throw new IllegalArgumentException("buttonNumber out of range");
+        }
+        return (eventCount[buttonNumber] + 1) / 2;
     }
 
     /**
@@ -642,6 +737,12 @@ public class Flic2Button {
         private byte[] qvClientRandomBytes;
         private int[] chaskeyKeys;
 
+        private boolean isDuo;
+        private boolean hasProcessedEndOfQueueMarker;
+        private long lastTimestamp;
+
+        private byte duoPushTwistMask;
+
         private Runnable firmwareCheckTimerRunnable;
         private int firmwareUpdateState;
         private byte[] firmwareUpdateData;
@@ -658,6 +759,11 @@ public class Flic2Button {
         private SetHidMidiConfigCallback setHidMidiConfigCallback;
         private byte[] getHidMidiBuffer;
         private GetHidMidiConfigCallback getHidMidiConfigCallback;
+
+        boolean forceButtonValidationOfAppCredentials;
+        byte[] appCredential;
+
+        int[] twistPosition = new int[2];
 
         Session(boolean onL2CAP, SessionCallback sessionCallback) {
             this.onL2CAP = onL2CAP;
@@ -765,6 +871,7 @@ public class Flic2Button {
             qvClientRandomBytes = req.random;
             req.encryptionVariant = 0;
             req.signatureVariant = 0;
+            req.supportsDuo = true;
             sendUnsignedPacket(req);
             state = STATE_WAIT_QUICK_VERIFY;
         }
@@ -780,13 +887,23 @@ public class Flic2Button {
         }
 
         private void sendInit() {
-            TxPacket.InitButtonEventsLightRequest req = new TxPacket.InitButtonEventsLightRequest();
-            req.bootId = bootId;
-            req.eventCount = eventCount;
-            req.autoDisconnectTime = Flic2Button.this.autoDisconnectTime;
-            req.maxQueuedPackets = useQuickVerify ? 31 : 0;
-            req.maxQueuedPacketsAge = 0xfffff;
-            sendSignedRequest(req);
+            if (!isDuo) {
+                TxPacket.InitButtonEventsLightRequest req = new TxPacket.InitButtonEventsLightRequest();
+                req.bootId = bootId;
+                req.eventCount = eventCount[0];
+                req.autoDisconnectTime = Flic2Button.this.autoDisconnectTime;
+                req.maxQueuedPackets = useQuickVerify ? 31 : 0;
+                req.maxQueuedPacketsAge = 0xfffff;
+                sendSignedRequest(req);
+            } else {
+                TxPacket.InitButtonEventsDuoLightRequest req = new TxPacket.InitButtonEventsDuoLightRequest();
+                req.bootId = bootId;
+                req.eventCount = eventCount;
+                req.autoDisconnectTime = Flic2Button.this.autoDisconnectTime;
+                req.maxQueuedPackets = useQuickVerify ? 31 : 0;
+                req.maxQueuedPacketsAge = 0xfffff;
+                sendSignedRequest(req);
+            }
         }
 
         private void sendConnParamsUpdate(int connIntervalMin, int connIntervalMax, int slaveLatency, int supervisionTimeout) {
@@ -834,6 +951,10 @@ public class Flic2Button {
 
         private void sendSetAutoDisconnectTime() {
             sendSignedPacket(new TxPacket.SetAutoDisconnectTimeInd(Flic2Button.this.autoDisconnectTime));
+        }
+
+        private void sendEnablePushTwistInd() {
+            sendSignedPacket(new TxPacket.EnablePushTwistInd(new boolean[] {(duoPushTwistMask & 1) != 0, (duoPushTwistMask & 2) != 0}));
         }
 
         private void setHidMidiConfig(byte[] data, SetHidMidiConfigCallback callback) {
@@ -925,10 +1046,17 @@ public class Flic2Button {
                                 manager.database.updateFirmwareCheckTimestamp(Flic2Button.this);
                                 checkFirmwareTimer();
                             } else {
-                                byte[] iv = Arrays.copyOf(result.data, 8);
-                                byte[] data = Arrays.copyOfRange(result.data, 8, result.data.length);
-                                firmwareUpdateState = FW_UPDATE_STATE_IDLE;
-                                performFirmwareUpdate(data, iv);
+                                if (!isDuo) {
+                                    byte[] iv = Arrays.copyOf(result.data, 4);
+                                    byte[] data = Arrays.copyOfRange(result.data, 8, result.data.length);
+                                    firmwareUpdateState = FW_UPDATE_STATE_IDLE;
+                                    performFirmwareUpdate(data, iv);
+                                } else {
+                                    byte[] header = Arrays.copyOf(result.data, 76);
+                                    byte[] data = Arrays.copyOfRange(result.data, 76, result.data.length);
+                                    firmwareUpdateState = FW_UPDATE_STATE_IDLE;
+                                    performFirmwareUpdate(data, header);
+                                }
                             }
                             boolean checkSuccess = result.alreadyUpdated || result.data != null;
                             boolean hasNewVersion = result.data != null;
@@ -959,7 +1087,6 @@ public class Flic2Button {
                     checkFirmwareTimer();
                 }
             }, useQuickVerify ? 0 : 30000);
-
         }
 
         private void sendBatteryLevelRequest() {
@@ -977,33 +1104,71 @@ public class Flic2Button {
         }
 
         private void firmwareUpdateContinue() {
-            while (firmwareUpdateSentPos < firmwareUpdateData.length / 4 && firmwareUpdateSentPos - firmwareUpdateAckPos < 512) {
-                int len = Math.min(firmwareUpdateData.length / 4 - firmwareUpdateSentPos, 30);
-                len = Math.min(len, 512 - (firmwareUpdateSentPos - firmwareUpdateAckPos));
-                sendSignedPacket(new TxPacket.FirmwareUpdateDataInd(Arrays.copyOfRange(firmwareUpdateData, firmwareUpdateSentPos * 4, (firmwareUpdateSentPos + len) * 4)));
-                firmwareUpdateSentPos += len;
+            if (!isDuo) {
+                while (firmwareUpdateSentPos < firmwareUpdateData.length / 4 && firmwareUpdateSentPos - firmwareUpdateAckPos < 512) {
+                    int len = Math.min(firmwareUpdateData.length / 4 - firmwareUpdateSentPos, 30);
+                    len = Math.min(len, 512 - (firmwareUpdateSentPos - firmwareUpdateAckPos));
+                    sendSignedPacket(new TxPacket.FirmwareUpdateDataInd(Arrays.copyOfRange(firmwareUpdateData, firmwareUpdateSentPos * 4, (firmwareUpdateSentPos + len) * 4)));
+                    firmwareUpdateSentPos += len;
+                }
+            } else {
+                int limit = 12 * 110;
+                while (firmwareUpdateSentPos < firmwareUpdateData.length && firmwareUpdateSentPos - firmwareUpdateAckPos < limit) {
+                    int len = Math.min(firmwareUpdateData.length - firmwareUpdateSentPos, 110);
+                    len = Math.min(len, limit - (firmwareUpdateSentPos - firmwareUpdateAckPos));
+                    sendSignedPacket(new TxPacket.FirmwareUpdateDataDuoInd(Arrays.copyOfRange(firmwareUpdateData, firmwareUpdateSentPos, firmwareUpdateSentPos + len)));
+                    firmwareUpdateSentPos += len;
+                }
             }
         }
 
-        public void performFirmwareUpdate(byte[] data, byte[] iv) {
+        public void performFirmwareUpdate(byte[] data, byte[] header) {
             if (firmwareUpdateState != FW_UPDATE_STATE_IDLE) {
                 return;
             }
 
             firmwareUpdateData = data;
-            sendSignedRequest(new TxPacket.StartFirmwareUpdateRequest(data.length / 4, iv, 60));
+            if (!isDuo) {
+                sendSignedRequest(new TxPacket.StartFirmwareUpdateRequest(data.length / 4, header, 60));
+            } else {
+                sendSignedRequest(new TxPacket.StartFirmwareUpdateDuoRequest(data.length, header, 2));
+            }
             firmwareUpdateState = FW_UPDATE_STATE_STARTING_UPDATE;
         }
 
         public void onBondComplete() {
             if (state == STATE_BONDING) {
-                byte[] verifier = Arrays.copyOf(Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'A', 'T'}), 16);
+                if (appCredential == null) {
+                    byte[] verifier = Arrays.copyOf(Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'A', 'T'}), 16);
 
-                TxPacket.FullVerifyRequest2WithoutAppToken req = new TxPacket.FullVerifyRequest2WithoutAppToken();
-                req.ecdhPublicKey = myPublicKey;
-                req.randomBytes = clientRandomBytes;
-                req.verifier = verifier;
-                sendUnsignedPacket(req);
+                    TxPacket.FullVerifyRequest2WithoutAppToken req = new TxPacket.FullVerifyRequest2WithoutAppToken();
+                    req.ecdhPublicKey = myPublicKey;
+                    req.randomBytes = clientRandomBytes;
+                    req.mustValidateAppToken = forceButtonValidationOfAppCredentials;
+                    req.supportsDuo = true;
+                    req.verifier = verifier;
+                    sendUnsignedPacket(req);
+                } else {
+                    byte[] appToken = Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'a', 'p', 'p'});
+                    for (int i = 0; i < 16; i++) {
+                        appToken[i] ^= appCredential[i];
+                    }
+                    appToken = Arrays.copyOf(appToken, 16);
+
+                    Mac verifierMac = Utils.createHmacSha256(fullVerifySharedSecret);
+                    verifierMac.update(new byte[]{'A', 'T'});
+                    verifierMac.update(appToken);
+                    byte[] verifier = Arrays.copyOf(verifierMac.doFinal(), 16);
+
+                    TxPacket.FullVerifyRequest2WithAppToken req = new TxPacket.FullVerifyRequest2WithAppToken();
+                    req.ecdhPublicKey = myPublicKey;
+                    req.randomBytes = clientRandomBytes;
+                    req.encryptedAppToken = appToken;
+                    req.mustValidateAppToken = forceButtonValidationOfAppCredentials;
+                    req.supportsDuo = true;
+                    req.verifier = verifier;
+                    sendUnsignedPacket(req);
+                }
 
                 chaskeyKeys = Flic2Crypto.chaskeyGenerateSubkeys(Arrays.copyOf(Utils.createHmacSha256(fullVerifySharedSecret).doFinal(new byte[]{'S', 'K'}), 16));
                 state = STATE_WAIT_FULL_VERIFY2;
@@ -1098,6 +1263,12 @@ public class Flic2Button {
                     clientRandomBytes = new byte[8];
                     Utils.secureRandom.nextBytes(clientRandomBytes);
                     byte[] flags = new byte[1];
+                    if (state == STATE_WAIT_FULL_VERIFY1) {
+                        flags[0] = (byte)(1 << 7); // supports duo
+                        if (forceButtonValidationOfAppCredentials) {
+                            flags[0] |= 1 << 6;
+                        }
+                    }
                     MessageDigest md = Utils.createSha256();
                     md.update(sharedSecret);
                     md.update((byte) i);
@@ -1150,6 +1321,7 @@ public class Flic2Button {
                         byte[] data = new byte[16];
                         System.arraycopy(qvClientRandomBytes, 0, data, 0, 7);
                         data[7] = 0; // encryption and signature variant
+                        data[7] |= (byte)(1 << 6); // supports duo
                         System.arraycopy(rsp.random, 0, data, 8, 8);
                         chaskeyKeys = Flic2Crypto.chaskeyGenerateSubkeys(Flic2Crypto.chaskey16Bytes(Flic2Crypto.chaskeyGenerateSubkeys(Flic2Button.this.pairingData.key), data));
 
@@ -1158,6 +1330,8 @@ public class Flic2Button {
                             listener.onFailure(Flic2Button.this, Flic2ButtonListener.FAILURE_QUICK_VERIFY_SIGNATURE_MISMATCH, 0);
                             return;
                         }
+
+                        isDuo = rsp.isDuo;
 
                         state = STATE_SESSION_ESTABLISHED;
                         sendInit();
@@ -1189,16 +1363,16 @@ public class Flic2Button {
                     }
                     RxPacket.FullVerifyResponse2 rsp = new RxPacket.FullVerifyResponse2(pkt);
                     if (!rsp.appCredentialsMatch) {
-                        if (rsp.caresAboutAppCredentials) {
+                        if (forceButtonValidationOfAppCredentials) {
+                            state = STATE_FAILED;
+                            listener.onFailure(Flic2Button.this, Flic2ButtonListener.FAILURE_APP_CREDENTIALS_NOT_MATCHING_DENIED_BY_APP, 0);
+                            return;
+                        } else if (rsp.caresAboutAppCredentials) {
                             state = STATE_FAILED;
                             listener.onFailure(Flic2Button.this, Flic2ButtonListener.FAILURE_APP_CREDENTIALS_NOT_MATCHING_DENIED_BY_BUTTON, 0);
                             return;
                         } else {
-                            if (manager.forceButtonValidationOfAppCredentials) {
-                                state = STATE_FAILED;
-                                listener.onFailure(Flic2Button.this, Flic2ButtonListener.FAILURE_APP_CREDENTIALS_NOT_MATCHING_DENIED_BY_APP, 0);
-                                return;
-                            }
+                            // ok
                         }
                     }
 
@@ -1215,6 +1389,8 @@ public class Flic2Button {
                     Flic2Button.this.lastKnownBatteryVoltage = rsp.batteryLevel * 3.6f / 1024.0f;
                     Flic2Button.this.lastKnownBatteryTimestampUtcMs = System.currentTimeMillis();
                     manager.database.addButton(Flic2Button.this);
+
+                    isDuo = rsp.isDuo;
 
                     state = STATE_SESSION_ESTABLISHED;
                     sendInit();
@@ -1295,14 +1471,20 @@ public class Flic2Button {
                 }
                 pkt = Arrays.copyOf(pkt, pkt.length - SIGNATURE_LENGTH);
 
-                if (opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITH_BOOT_ID || opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITHOUT_BOOT_ID) {
+                if (opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITH_BOOT_ID || opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITHOUT_BOOT_ID || opcode == RxPacket.INIT_BUTTON_EVENTS_DUO_RESPONSE_WITH_BOOT_ID || opcode == RxPacket.INIT_BUTTON_EVENTS_DUO_RESPONSE_WITHOUT_BOOT_ID) {
                     responseReceived();
-                    if (opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITHOUT_BOOT_ID) {
+                    if (opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITHOUT_BOOT_ID || opcode == RxPacket.INIT_BUTTON_EVENTS_DUO_RESPONSE_WITHOUT_BOOT_ID) {
                         pkt = Utils.concatArrays(pkt, Utils.intToBytes(Flic2Button.this.bootId));
                     }
-                    RxPacket.InitButtonEventsResponse rsp = new RxPacket.InitButtonEventsResponse(pkt);
+                    RxPacket.InitButtonEventsDuoResponse rsp;
+                    if (opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITH_BOOT_ID || opcode == RxPacket.INIT_BUTTON_EVENTS_RESPONSE_WITHOUT_BOOT_ID) {
+                        RxPacket.InitButtonEventsResponse r = new RxPacket.InitButtonEventsResponse(pkt);
+                        rsp = new RxPacket.InitButtonEventsDuoResponse(r);
+                    } else {
+                        rsp = new RxPacket.InitButtonEventsDuoResponse(pkt);
+                    }
                     boolean bootIdChanged = Flic2Button.this.bootId != rsp.bootId;
-                    boolean eventCountChanged = Flic2Button.this.eventCount != rsp.eventCount;
+                    boolean eventCountChanged = Flic2Button.this.eventCount[0] != rsp.eventCount[0] || Flic2Button.this.eventCount[1] != rsp.eventCount[1];
                     Flic2Button.this.bootId = rsp.bootId;
                     Flic2Button.this.eventCount = rsp.eventCount;
                     if (eventCountChanged && !bootIdChanged) {
@@ -1332,7 +1514,7 @@ public class Flic2Button {
                     return;
                 }
 
-                if (opcode == RxPacket.BUTTON_NOTIFICATION) {
+                if (opcode == RxPacket.BUTTON_EVENT_NOTIFICATION && !isDuo) {
                     RxPacket.ButtonEventNotification p = new RxPacket.ButtonEventNotification(pkt);
                     boolean sendAck = false;
                     boolean anyWasLastQueued = false;
@@ -1370,7 +1552,7 @@ public class Flic2Button {
                         item.eventCount = ec;
                     }
                     for (RxPacket.ButtonEventNotificationItem item : p.items) {
-                        Flic2Button.this.eventCount = item.eventCount;
+                        Flic2Button.this.eventCount[0] = item.eventCount;
                         int type = item.eventEncoded & 3;
                         boolean wasHold = false;
                         boolean singleClick = false;
@@ -1388,32 +1570,32 @@ public class Flic2Button {
 
                         if (type == 0) {
                             // up
-                            listener.onButtonUpOrDown(Flic2Button.this, item.wasQueued, item.wasQueuedLast && wasHold && !singleClick && !doubleClick, item.timestamp, true, false);
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_UP_OR_DOWN, Flic2ButtonEvent.EVENT_TYPE_UP, ec, item.wasQueued, item.wasQueuedLast && wasHold && !singleClick && !doubleClick, item.timestamp));
                             if (!wasHold) {
-                                listener.onButtonClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast && !singleClick && !doubleClick, item.timestamp, true, false);
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_CLICK, ec, item.wasQueued, item.wasQueuedLast && !singleClick && !doubleClick, item.timestamp));
                                 if (singleClick) {
-                                    listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, false, item.timestamp, true, false, false);
+                                    listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, item.wasQueued, false, item.timestamp));
                                 }
                             }
                             if (singleClick) {
-                                listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false);
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, item.wasQueued, item.wasQueuedLast, item.timestamp));
                             }
                             if (doubleClick) {
-                                listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, false, item.timestamp, false, true);
-                                listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, true, false);
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK, Flic2ButtonEvent.EVENT_TYPE_DOUBLE_CLICK, ec, item.wasQueued, false, item.timestamp));
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_DOUBLE_CLICK, ec, item.wasQueued, item.wasQueuedLast, item.timestamp));
                             }
                         } else if (type == 1) {
                             // down
-                            listener.onButtonUpOrDown(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, true);
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_UP_OR_DOWN, Flic2ButtonEvent.EVENT_TYPE_DOWN, ec, item.wasQueued, item.wasQueuedLast, item.timestamp));
                         } else if (type == 2) {
                             // single click timeout
-                            listener.onButtonSingleOrDoubleClick(Flic2Button.this, item.wasQueued, false, item.timestamp, true, false);
-                            listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, true, false, false);
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, item.wasQueued, false, item.timestamp));
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, item.wasQueued, item.wasQueuedLast, item.timestamp));
                         } else if (type == 3) {
                             // hold
-                            listener.onButtonClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast && nextUpWillBeDoubleClick, item.timestamp, false, true);
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_HOLD, ec, item.wasQueued, item.wasQueuedLast && !nextUpWillBeDoubleClick, item.timestamp));
                             if (!nextUpWillBeDoubleClick) {
-                                listener.onButtonSingleOrDoubleClickOrHold(Flic2Button.this, item.wasQueued, item.wasQueuedLast, item.timestamp, false, false, true);
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_HOLD, ec, item.wasQueued, item.wasQueuedLast, item.timestamp));
                             }
                         }
                         if ((type == 0 && (singleClick || doubleClick)) || type == 2) {
@@ -1426,11 +1608,165 @@ public class Flic2Button {
                     }
                     manager.database.updateEventCounter(Flic2Button.this);
                     if (sendAck) {
-                        sendSignedPacket(new TxPacket.AckButtonEvents(p.eventCounter));
+                        sendSignedPacket(new TxPacket.AckButtonEventsInd(p.eventCounter));
                     }
                     if (anyWasLastQueued) {
                         afterInitialButtonEventsReceived();
                     }
+                    return;
+                }
+
+                if (opcode == RxPacket.BUTTON_EVENT_DUO_NOTIFICATION && isDuo) {
+                    RxPacket.Reader reader = new RxPacket.Reader(pkt);
+                    boolean[] gotEventCount = new boolean[2];
+
+                    boolean sendAck = false;
+
+                    while (reader.left() > 1) {
+                        byte buttonNumber = (byte) reader.bits(1);
+
+                        if (!gotEventCount[buttonNumber]) {
+                            int eventCounterDelta = (int) reader.bits(1);
+                            if (eventCounterDelta == 1 && reader.bitBool()) {
+                                int numBits = new int[]{2, 4, 8, 32}[(int) reader.bits(2)];
+                                eventCounterDelta = (int) reader.bits(numBits);
+                            }
+                            ++eventCounterDelta;
+                            eventCount[buttonNumber] += eventCounterDelta;
+                            gotEventCount[buttonNumber] = true;
+                        } else {
+                            ++eventCount[buttonNumber];
+                        }
+
+                        long timestampDelta = reader.bits(new int[]{8, 10, 13, 16, 24, 32, 40, 48}[(int) reader.bits(3)]);
+                        lastTimestamp += timestampDelta;
+
+                        boolean wasQueued = false;
+                        boolean thisWasLastQueued = false;
+
+                        if (!hasProcessedEndOfQueueMarker) {
+                            if (!reader.bitBool()) {
+                                // This event does not mark end of queue
+                                wasQueued = true;
+                            } else {
+                                hasProcessedEndOfQueueMarker = true;
+                                if (!reader.bitBool()) {
+                                    // This event is the last event queued
+                                    wasQueued = true;
+                                    thisWasLastQueued = true;
+                                } else {
+                                    // The last event queued had to be discarded; this event is the first non-queued event
+                                    listener.onAllQueuedButtonEventsProcessed(Flic2Button.this);
+                                }
+                                afterInitialButtonEventsReceived();
+                            }
+                        }
+
+                        boolean theDoubleClickWasAlsoAHold = false, nextUpWillBeDoubleClick = false;
+
+                        int type = (int) reader.bits(3);
+                        if (type <= 4) {
+                            // Up
+                            if (type == 4) {
+                                theDoubleClickWasAlsoAHold = reader.bitBool();
+                            }
+                        } else if (type == 7) {
+                            // Hold
+                            nextUpWillBeDoubleClick = reader.bitBool();
+                        }
+
+                        byte gestureData = -1;
+
+                        if (type <= 4 || type == 6) {
+                            boolean withGesture = reader.bitBool();
+                            if (withGesture) {
+                                // With gesture
+                                boolean gestureRecognized = reader.bitBool();
+                                if (gestureRecognized) {
+                                    gestureData = (byte) (reader.bits(2) + 1);
+                                    String[] gestures = new String[]{"LEFT", "RIGHT", "UP", "DOWN"};
+                                } else {
+                                    gestureData = 0;
+                                }
+                            }
+                        }
+
+                        byte x = (byte) reader.bits(8);
+                        byte y = (byte) reader.bits(8);
+                        byte z = (byte) reader.bits(8);
+
+                        if (type <= 5 && eventCount[buttonNumber] % 2 == 0) {
+                            // Up or down was not preceded by hold or single click timeout
+                            ++eventCount[buttonNumber];
+                        }
+
+                        int ec = eventCount[buttonNumber];
+                        if (type <= 4) {
+                            // Up
+                            boolean wasHold = type == 2 || (type == 4 && theDoubleClickWasAlsoAHold);
+                            boolean doubleClick = type == 3 || type == 4;
+                            boolean singleClick = type == 1 || type == 2;
+                            boolean downAtLeastHalfASecond = type == 1 || type == 2 || type == 4;
+
+                            if (singleClick || doubleClick) {
+                                sendAck = true;
+                            }
+
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_UP_OR_DOWN, Flic2ButtonEvent.EVENT_TYPE_UP, ec, buttonNumber, wasQueued, false, lastTimestamp, x, y, z, gestureData, downAtLeastHalfASecond));
+                            if (!wasHold) {
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_CLICK, ec, buttonNumber, wasQueued, thisWasLastQueued && !singleClick && !doubleClick, lastTimestamp, x, y, z, gestureData, downAtLeastHalfASecond));
+                                if (singleClick) {
+                                    listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, buttonNumber, wasQueued, false, lastTimestamp, x, y, z, gestureData, downAtLeastHalfASecond));
+                                }
+                            }
+                            if (singleClick) {
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, buttonNumber, wasQueued, thisWasLastQueued, lastTimestamp, x, y, z, gestureData, downAtLeastHalfASecond));
+                            } else if (doubleClick) {
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK, Flic2ButtonEvent.EVENT_TYPE_DOUBLE_CLICK, ec, buttonNumber, wasQueued, false, lastTimestamp, x, y, z, gestureData, downAtLeastHalfASecond));
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_DOUBLE_CLICK, ec, buttonNumber, wasQueued, thisWasLastQueued, lastTimestamp, x, y, z, gestureData, downAtLeastHalfASecond));
+                            }
+                        } else if (type == 5) {
+                            // Down
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_UP_OR_DOWN, Flic2ButtonEvent.EVENT_TYPE_DOWN, ec, buttonNumber, wasQueued, thisWasLastQueued, lastTimestamp, x, y, z, gestureData, false));
+                        } else if (type == 6) {
+                            // Single click timeout
+                            sendAck = true;
+
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, buttonNumber, wasQueued, false, lastTimestamp, x, y, z, gestureData, false));
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_SINGLE_CLICK, ec, buttonNumber, wasQueued, thisWasLastQueued, lastTimestamp, x, y, z, gestureData, false));
+                        } else {
+                            // Hold
+                            listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_HOLD, ec, buttonNumber, wasQueued, thisWasLastQueued && !nextUpWillBeDoubleClick, lastTimestamp, x, y, z, gestureData, true));
+                            if (!nextUpWillBeDoubleClick) {
+                                listener.onButtonEvent(Flic2Button.this, new Flic2ButtonEvent(Flic2ButtonEvent.EVENT_CLASS_SINGLE_OR_DOUBLE_CLICK_OR_HOLD, Flic2ButtonEvent.EVENT_TYPE_HOLD, ec, buttonNumber, wasQueued, thisWasLastQueued, lastTimestamp, x, y, z, gestureData, true));
+                            }
+                        }
+
+                        if (thisWasLastQueued) {
+                            listener.onAllQueuedButtonEventsProcessed(Flic2Button.this);
+                        }
+                    }
+
+                    manager.database.updateEventCounter(Flic2Button.this);
+
+                    if (sendAck) {
+                        sendSignedPacket(new TxPacket.AckButtonEventsDuoInd(eventCount));
+                    }
+
+                    return;
+                }
+
+                if (opcode == RxPacket.PUSH_TWIST_DATA_NOTIFICATION && pkt.length >= 5) {
+                    RxPacket.PushTwistDataNotification p = new RxPacket.PushTwistDataNotification(pkt);
+                    for (int i = 0; i < 2; i++) {
+                        if (p.buttonsPressed[i]) {
+                            twistPosition[i] += p.angleDiff;
+                        }
+                    }
+                    listener.onDuoPushTwistNotification(new FlicDuoPushTwistNotificationButtonInfo[] {
+                            new FlicDuoPushTwistNotificationButtonInfo(p.buttonsPressed[0], p.isFirstEvent[0], p.buttonsPressedForAtLeastHalfASecond[0]),
+                            new FlicDuoPushTwistNotificationButtonInfo(p.buttonsPressed[1], p.isFirstEvent[1], p.buttonsPressedForAtLeastHalfASecond[1])
+                    }, p.angleDiff);
                     return;
                 }
 
@@ -1476,7 +1812,7 @@ public class Flic2Button {
                 if (opcode == RxPacket.FIRMWARE_UPDATE_NOTIFICATION && pkt.length >= 4 && firmwareUpdateState == FW_UPDATE_STATE_PERFORMING_UPDATE) {
                     RxPacket.FirmwareUpdateNotification notification = new RxPacket.FirmwareUpdateNotification(pkt);
                     firmwareUpdateAckPos = notification.pos;
-                    if (firmwareUpdateAckPos == firmwareUpdateData.length / 4) {
+                    if (firmwareUpdateAckPos == firmwareUpdateData.length / (isDuo ? 1 : 4)) {
                         // Done
                         log("FW update done");
                         // Button automatically reboots when disconnected after fw update

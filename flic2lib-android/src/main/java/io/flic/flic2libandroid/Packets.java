@@ -21,7 +21,7 @@ abstract class TxPacket {
     public static final int START_API_TIMER_IND = 13;
     public static final int PING_RESPONSE = 14;
     public static final int INIT_BUTTON_EVENTS_REQUEST = 15;
-    public static final int ACK_BUTTON_EVENTS = 16;
+    public static final int ACK_BUTTON_EVENTS_IND = 16;
     public static final int START_FIRMWARE_UPDATE_REQUEST = 17;
     public static final int FIRMWARE_UPDATE_DATA_IND = 18;
     public static final int SET_AUTO_DISCONNECT_TIME_IND = 19;
@@ -32,6 +32,15 @@ abstract class TxPacket {
     public static final int SET_HID_MIDI_CONFIG_DATA_IND = 28;
     public static final int SET_HID_MIDI_CONFIG_APPLY_REQUEST = 29;
     public static final int GET_HID_MIDI_CONFIG_REQUEST = 30;
+    public static final int EXECUTE_LED_PATTERN_IND = 32;
+    public static final int ABORT_LED_PATTERN_IND = 33;
+
+    public static final int INIT_BUTTON_EVENTS_DUO_REQUEST = 34;
+    public static final int INIT_BUTTON_EVENTS_DUO_LIGHT_REQUEST = 35;
+    public static final int ACK_BUTTON_EVENTS_DUO_IND = 36;
+    public static final int ENABLE_PUSH_TWIST_IND = 37;
+    public static final int START_FIRMWARE_UPDATE_DUO_REQUEST = 38;
+    public static final int FIRMWARE_UPDATE_DATA_DUO_IND = 39;
 
 
     protected abstract void write(Writer w);
@@ -138,6 +147,7 @@ abstract class TxPacket {
         int signatureVariant;
         int encryptionVariant;
         boolean mustValidateAppToken;
+        boolean supportsDuo;
         byte[] verifier;
 
         @Override
@@ -147,7 +157,7 @@ abstract class TxPacket {
             w.bits(signatureVariant, 3);
             w.bits(encryptionVariant, 3);
             w.bitBool(mustValidateAppToken);
-            w.bitsPadding(1);
+            w.bitBool(supportsDuo);
         }
     }
 
@@ -176,6 +186,7 @@ abstract class TxPacket {
         byte[] random; // 7 bytes
         int signatureVariant;
         int encryptionVariant;
+        boolean supportsDuo;
         int tmpId;
         int pairingId;
 
@@ -185,7 +196,8 @@ abstract class TxPacket {
             w.ba(random);
             w.bits(signatureVariant, 3);
             w.bits(encryptionVariant, 3);
-            w.bitsPadding(2);
+            w.bitBool(supportsDuo);
+            w.bitsPadding(1);
             w.i(tmpId);
             w.i(pairingId);
         }
@@ -226,17 +238,52 @@ abstract class TxPacket {
         }
     }
 
-    static class AckButtonEvents extends TxPacket {
+    static class AckButtonEventsInd extends TxPacket {
         int eventCount;
 
-        public AckButtonEvents(int eventCount) {
+        public AckButtonEventsInd(int eventCount) {
             this.eventCount = eventCount;
         }
 
         @Override
         protected void write(Writer w) {
-            w.opcode(ACK_BUTTON_EVENTS);
+            w.opcode(ACK_BUTTON_EVENTS_IND);
             w.i(eventCount);
+        }
+    }
+
+    static class InitButtonEventsDuoLightRequest extends TxPacket {
+        int[] eventCount;
+        int bootId;
+        int autoDisconnectTime;
+        int maxQueuedPackets;
+        int maxQueuedPacketsAge;
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(INIT_BUTTON_EVENTS_DUO_LIGHT_REQUEST);
+            w.i(eventCount[0]);
+            w.i(eventCount[1]);
+            w.i(bootId);
+            w.bits(autoDisconnectTime, 9);
+            w.bits(maxQueuedPackets, 5);
+            w.bits(maxQueuedPacketsAge, 20);
+            w.bitsPadding(6);
+        }
+    }
+
+    static class AckButtonEventsDuoInd extends TxPacket {
+        int[] eventCount;
+
+        public AckButtonEventsDuoInd(int[] eventCount) {
+            this.eventCount = eventCount;
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(ACK_BUTTON_EVENTS_DUO_IND);
+            w.i(eventCount[0]);
+            w.i(eventCount[1]);
         }
     }
 
@@ -324,6 +371,26 @@ abstract class TxPacket {
         }
     }
 
+    static class StartFirmwareUpdateDuoRequest extends TxPacket {
+        int length;
+        byte[] header;
+        int statusInterval;
+
+        public StartFirmwareUpdateDuoRequest(int length, byte[] header, int statusInterval) {
+            this.length = length;
+            this.header = header;
+            this.statusInterval = statusInterval;
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(START_FIRMWARE_UPDATE_DUO_REQUEST);
+            w.i(length);
+            w.ba(header); // 76 first bytes of firmware image
+            w.s(statusInterval);
+        }
+    }
+
     static class FirmwareUpdateDataInd extends TxPacket {
         byte[] chunk;
 
@@ -334,6 +401,20 @@ abstract class TxPacket {
         @Override
         protected void write(Writer w) {
             w.opcode(FIRMWARE_UPDATE_DATA_IND);
+            w.ba(chunk);
+        }
+    }
+
+    static class FirmwareUpdateDataDuoInd extends TxPacket {
+        byte[] chunk;
+
+        public FirmwareUpdateDataDuoInd(byte[] chunk) {
+            this.chunk = chunk;
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(FIRMWARE_UPDATE_DATA_DUO_IND);
             w.ba(chunk);
         }
     }
@@ -423,6 +504,51 @@ abstract class TxPacket {
             w.opcode(GET_HID_MIDI_CONFIG_REQUEST);
         }
     }
+
+    static class ExecuteLedPatternInd extends TxPacket {
+        int colour;
+        boolean overrideDefaultLedBehaviour;
+        boolean continueAfterDisconnect;
+        short brightness;
+        int pulseOnLen;
+        int pulseOffLen;
+        int numPeriods;
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(EXECUTE_LED_PATTERN_IND);
+            w.bits(colour, 2);
+            w.bitBool(overrideDefaultLedBehaviour);
+            w.bitBool(continueAfterDisconnect);
+            w.bitsPadding(1);
+            w.bits(brightness, 11);
+            w.i(pulseOnLen);
+            w.i(pulseOffLen);
+            w.i(numPeriods);
+        }
+    }
+
+    static class AbortLedPatternInd extends TxPacket {
+        @Override
+        protected void write(Writer w) {
+            w.opcode(ABORT_LED_PATTERN_IND);
+        }
+    }
+
+    static class EnablePushTwistInd extends TxPacket {
+        boolean[] buttons;
+
+        public EnablePushTwistInd(boolean[] buttons) {
+            this.buttons = buttons;
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(ENABLE_PUSH_TWIST_IND);
+            w.bitBool(buttons[0]);
+            w.bitBool(buttons[1]);
+        }
+    }
 }
 
 abstract class RxPacket {
@@ -440,7 +566,7 @@ abstract class RxPacket {
 
     public static final int INIT_BUTTON_EVENTS_RESPONSE_WITH_BOOT_ID = 10;
     public static final int INIT_BUTTON_EVENTS_RESPONSE_WITHOUT_BOOT_ID = 11;
-    public static final int BUTTON_NOTIFICATION = 12;
+    public static final int BUTTON_EVENT_NOTIFICATION = 12;
     public static final int API_TIMER_NOTIFICATION = 13;
     public static final int NAME_UPDATED_NOTIFICATION = 14;
     public static final int PING_REQUEST = 15;
@@ -455,8 +581,12 @@ abstract class RxPacket {
     public static final int GET_HID_MIDI_CONFIG_DATA_IND = 27;
     public static final int GET_HID_MIDI_CONFIG_RESPONSE = 28;
 
-    static class UnexpectedEndOfPacketException extends Exception {
+    public static final int INIT_BUTTON_EVENTS_DUO_RESPONSE_WITH_BOOT_ID = 30;
+    public static final int INIT_BUTTON_EVENTS_DUO_RESPONSE_WITHOUT_BOOT_ID = 31;
+    public static final int BUTTON_EVENT_DUO_NOTIFICATION = 32;
+    public static final int PUSH_TWIST_DATA_NOTIFICATION = 33;
 
+    static class UnexpectedEndOfPacketException extends Exception {
     }
 
     protected static class Reader {
@@ -590,6 +720,7 @@ abstract class RxPacket {
     static class FullVerifyResponse2 extends RxPacket {
         boolean appCredentialsMatch;
         boolean caresAboutAppCredentials;
+        boolean isDuo;
         byte[] buttonUuid;
         String name;
         int firmwareVersion;
@@ -600,7 +731,8 @@ abstract class RxPacket {
             super(arr);
             appCredentialsMatch = r.bitBool();
             caresAboutAppCredentials = r.bitBool();
-            r.bitsPadding(6);
+            isDuo = r.bitBool();
+            r.bitsPadding(5);
             buttonUuid = r.ba(16);
             int nameLen = r.b();
             if (nameLen < 0 || nameLen > 23) {
@@ -650,11 +782,17 @@ abstract class RxPacket {
     static class QuickVerifyResponse extends RxPacket {
         byte[] random;
         int tmpId;
+        boolean linkIsEncrypted;
+        boolean hasBondInfo;
+        boolean isDuo;
 
         QuickVerifyResponse(byte[] arr) throws UnexpectedEndOfPacketException {
             super(arr);
             random = r.ba(8);
             tmpId = r.i();
+            linkIsEncrypted = r.bitBool();
+            hasBondInfo = r.bitBool();
+            isDuo = r.bitBool();
         }
     }
 
@@ -678,6 +816,29 @@ abstract class RxPacket {
             hasQueuedEvents = r.bitBool();
             timestamp = r.bits(47) * 1000 / 32768;
             eventCount = r.i();
+            bootId = r.i();
+        }
+    }
+
+    static class InitButtonEventsDuoResponse extends RxPacket {
+        boolean hasQueuedEvents;
+        long timestamp;
+        int[] eventCount;
+        int bootId;
+
+        InitButtonEventsDuoResponse(InitButtonEventsResponse r) {
+            super(null);
+            hasQueuedEvents = r.hasQueuedEvents;
+            timestamp = r.timestamp;
+            eventCount = new int[] {r.eventCount, 0};
+            bootId = r.bootId;
+        }
+
+        InitButtonEventsDuoResponse(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            hasQueuedEvents = r.bitBool();
+            timestamp = r.bits(47);
+            eventCount = new int[] {r.i(), r.i()};
             bootId = r.i();
         }
     }
@@ -793,6 +954,22 @@ abstract class RxPacket {
         GetHidMidiConfigDataResponse(byte[] arr) throws UnexpectedEndOfPacketException {
             super(arr);
             result = r.b();
+        }
+    }
+
+    static class PushTwistDataNotification extends RxPacket {
+        boolean[] buttonsPressed;
+        boolean[] isFirstEvent;
+        boolean[] buttonsPressedForAtLeastHalfASecond;
+        int angleDiff; // 65536 per 360 degrees
+
+        PushTwistDataNotification(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            buttonsPressed = new boolean[] {r.bitBool(), r.bitBool()};
+            isFirstEvent = new boolean[] {r.bitBool(), r.bitBool()};
+            buttonsPressedForAtLeastHalfASecond = new boolean[] {r.bitBool(), r.bitBool()};
+            r.bitsPadding(2);
+            angleDiff = r.i();
         }
     }
 }

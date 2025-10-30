@@ -293,6 +293,22 @@ public class Flic2ButtonListener {
     }
 
     /**
+     * Generic button event handler.
+     *
+     * <p>This handler can be used as an alternative to {@link #onButtonUpOrDown(Flic2Button, boolean, boolean, long, boolean, boolean)},
+     * {@link #onButtonClickOrHold(Flic2Button, boolean, boolean, long, boolean, boolean)},
+     * {@link #onButtonSingleOrDoubleClick(Flic2Button, boolean, boolean, long, boolean, boolean)} and
+     * {@link #onButtonSingleOrDoubleClickOrHold(Flic2Button, boolean, boolean, long, boolean, boolean, boolean)}
+     * when more information about the event is needed. For Flic Duo, this handler also contains events and
+     * information not exposed by the other methods, and must be used to receive events for the small button.</p>
+     *
+     * @param button The {@link Flic2Button} that fired the event.
+     * @param event The {@link Flic2ButtonEvent} that was fired.
+     */
+    public void onButtonEvent(Flic2Button button, Flic2ButtonEvent event) {
+    }
+
+    /**
      * All queued button events processed handler.
      *
      * <p>Emitted after all queued button events have been emitted, or immediately after {@link #onReady(Flic2Button, long)} if there are no queued events.</p>
@@ -300,5 +316,17 @@ public class Flic2ButtonListener {
      * @param button The {@link Flic2Button} that fired the event.
      */
     public void onAllQueuedButtonEventsProcessed(Flic2Button button) {
+    }
+
+    /**
+     * Push twist notifications for Flic Duo.
+     *
+     * <p>This event is emitted continuously when the push twist feature has been activated (see {@link Flic2Button#enableDuoPushTwist(boolean, boolean)}.</p>
+     *
+     * @param buttonInfo An array of always two {@link FlicDuoPushTwistNotificationButtonInfo} objects. The first corresponds to the big button and the second to the small button.
+     *                   If the push twist feature has not been enabled for one particular button, the corresponding object will contain {@code false} for every field.
+     * @param angleDiff The angle difference since the previous value (can be negative). A full rotation (360 degrees) corresponds to the value 65536.
+     */
+    public void onDuoPushTwistNotification(FlicDuoPushTwistNotificationButtonInfo[] buttonInfo, int angleDiff) {
     }
 }

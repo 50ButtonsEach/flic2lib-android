@@ -177,7 +177,7 @@ class Utils {
 
         URL url;
         try {
-            url = new URL("https://api.flic.io/api/v1/buttons/versions/firmware2");
+            url = new URL("https://api.flic.io/api/v1/buttons/versions/firmware3");
         } catch (MalformedURLException e) {
             throw new RuntimeException(e);
         }

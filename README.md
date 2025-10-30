@@ -4,12 +4,12 @@
 
 # Flic2 lib for Android
 
-The official library for Flic2 on Android.
+The official library for Flic 2 and Flic Duo buttons on Android.
 
 The library is hosted at JitPack and can be included in your Android app by entering the following in your `build.gradle` file:
 
     dependencies {
-        implementation 'com.github.50ButtonsEach:flic2lib-android:1.+'
+        implementation 'com.github.50ButtonsEach:flic2lib-android:2.+'
     }
 
 If you have not already done so, include the JitPack repository in your root `build.gradle` file:
@@ -172,7 +172,7 @@ button.addListener(new Flic2ButtonListener() {
 });
 ```
 
-There are other kinds of listeners if you instead want to distinguish click, double click and hold. See the API documentation for more information.
+There are other kinds of listeners if you instead want to distinguish click, double click and hold. If you want to support Flic Duo, then implement the `onButtonEvent` callback ONLY instead; all button events will be delivered to this callback instead of the individual ones. See the API documentation for more information.
 
 If the button was pressed while it was disconnected, the button events will be sent when it later connects (the latest that could fit on the internal memory). Sometimes it's not desired to get old events. In that case the formula `wasQueued && button.getReadyTimestamp() - timestamp > 15000` can be used in the event callback to detect if the event was older than 15 seconds.
 

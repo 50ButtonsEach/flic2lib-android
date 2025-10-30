@@ -86,6 +86,7 @@ public class Flic2Manager {
     LoggerInterface logger;
 
     boolean forceButtonValidationOfAppCredentials;
+    byte[] appCredential;
 
     private final LinkedList<Flic2Button> allButtons = new LinkedList<>();
 
@@ -997,6 +998,8 @@ public class Flic2Manager {
                     database.deleteButton(button);
                 }
             });
+            session.appCredential = appCredential;
+            session.forceButtonValidationOfAppCredentials = forceButtonValidationOfAppCredentials;
             session.start(mtu);
         }
 
@@ -1101,6 +1104,7 @@ public class Flic2Manager {
                             if (button.currentGattCb != FlicGattCallback.this || thisDisconnectCount != disconnectCount) {
                                 return;
                             }
+                            gatt.requestMtu(517);
                             start(true);
                         }
                     });
