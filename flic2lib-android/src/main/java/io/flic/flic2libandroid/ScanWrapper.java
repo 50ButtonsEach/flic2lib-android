@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.UUID;
 
+@SuppressWarnings("MissingPermission")
 abstract class ScanWrapper {
     private static final String TAG = "ScanWrapper";
 

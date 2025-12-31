@@ -1047,7 +1047,7 @@ public class Flic2Button {
                                 checkFirmwareTimer();
                             } else {
                                 if (!isDuo) {
-                                    byte[] iv = Arrays.copyOf(result.data, 4);
+                                    byte[] iv = Arrays.copyOf(result.data, 8);
                                     byte[] data = Arrays.copyOfRange(result.data, 8, result.data.length);
                                     firmwareUpdateState = FW_UPDATE_STATE_IDLE;
                                     performFirmwareUpdate(data, iv);
@@ -1175,6 +1175,7 @@ public class Flic2Button {
             }
         }
 
+        @SuppressWarnings("MissingPermission")
         public void onData(byte[] value) {
             try {
                 int packetConnId;

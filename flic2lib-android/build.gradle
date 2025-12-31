@@ -3,8 +3,12 @@ plugins {
     id "com.android.library"
 }
 
+ext {
+    versionNumber = "2.0.1"
+}
+
 group = 'io.flic'
-version = '2.0.0'
+version = versionNumber
 
 android {
     compileSdkVersion 36
@@ -12,8 +16,8 @@ android {
     defaultConfig {
         minSdkVersion 19
         targetSdkVersion 36
-        versionName '2.0.0'
-        buildConfigField("String", "VERSION_NAME", "\"2.0.0\"")
+        versionName versionNumber
+        buildConfigField("String", "VERSION_NAME", "\"${versionNumber}\"")
 
         consumerProguardFiles 'consumer-rules.pro'
     }
@@ -32,7 +36,6 @@ android {
     publishing {
         singleVariant('release') {
             withSourcesJar()
-            withJavadocJar()
         }
     }
 
@@ -43,17 +46,33 @@ dependencies {
     implementation fileTree(dir: 'libs', include: ['*.jar'])
 }
 
+tasks.register('androidJavadoc', Javadoc) {
+    source = android.sourceSets.main.java.srcDirs
+    classpath += project.files(android.getBootClasspath().join(File.pathSeparator))
+    android.libraryVariants.configureEach { variant ->
+        if (variant.name == 'release') {
+            classpath += variant.javaCompileProvider.get().classpath
+        }
+    }
+}
+
+tasks.register('androidJavadocJar', Jar) {
+    dependsOn androidJavadoc
+    archiveClassifier.set('javadoc')
+    from androidJavadoc.destinationDir
+}
+
 afterEvaluate {
     publishing {
         publications {
             release(MavenPublication) {
                 groupId = "io.flic"
                 artifactId = "flic2lib-android"
-                version = "2.0.0"
+                version = versionNumber
 
-                afterEvaluate {
-                    from components.release
-                }
+                from components.release
+
+                artifact tasks.androidJavadocJar
             }
         }
     }

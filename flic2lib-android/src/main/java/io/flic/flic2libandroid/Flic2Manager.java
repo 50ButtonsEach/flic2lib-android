@@ -67,6 +67,7 @@ import java.util.UUID;
  * Foreground Service running in your app. Otherwise the app process may be killed at any time
  * and the Bluetooth connections are thereby terminated.</p>
  */
+@SuppressWarnings("MissingPermission")
 public class Flic2Manager {
     private static final String TAG = "Flic2Manager";
 

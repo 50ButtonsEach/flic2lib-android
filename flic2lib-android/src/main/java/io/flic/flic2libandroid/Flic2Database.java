@@ -1,5 +1,6 @@
 package io.flic.flic2libandroid;
 
+import android.annotation.SuppressLint;
 import android.content.ContentValues;
 import android.content.Context;
 import android.database.Cursor;
@@ -136,6 +137,7 @@ class Flic2Database extends SQLiteOpenHelper {
         update(button, values);
     }
 
+    @SuppressLint("Range")
     public List<Flic2Button> getButtons(Flic2Manager manager) {
         SQLiteDatabase db = getWritableDatabase();
         Cursor query = db.query("buttons", null, null, null, null, null, null);
