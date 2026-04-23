@@ -684,6 +684,16 @@ public class Flic2Button {
     }
 
     /**
+     * Returns whether the first character of the serial number of this device matches 'D', indicating
+     * it is a Flic Duo device
+     *
+     * @return true if the device is a Flic Duo device, false otherwise
+     */
+    public boolean isDuo() {
+        return Flic2Button.this.serialNumber.charAt(0) == 'D';
+    }
+
+    /**
      * Gets a string representation.
      *
      * <p>Should only be used for debug purposes.</p>
