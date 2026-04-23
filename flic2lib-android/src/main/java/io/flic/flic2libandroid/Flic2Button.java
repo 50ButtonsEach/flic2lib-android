@@ -684,14 +684,13 @@ public class Flic2Button {
     }
 
     /**
-     * As long as the device connection is active, will return whether it is a Flic Duo or not,
-     * otherwise, will return false.
+     * Returns whether the first character of the serial number of this device matches 'D', indicating
+     * it is a Flic Duo device
      *
-     * @return true if the device has an active connection and is a Flic Duo device, false otherwise
+     * @return true if the device is a Flic Duo device, false otherwise
      */
     public boolean isDuo() {
-        Session s = Flic2Button.this.currentGattCb.getSession();
-        return (s != null && s.isEstablished() && s.isDuo);
+        return Flic2Button.this.serialNumber.charAt(0) == 'D';
     }
 
     /**
