@@ -684,6 +684,17 @@ public class Flic2Button {
     }
 
     /**
+     * As long as the device connection is active, will return whether it is a Flic Duo or not,
+     * otherwise, will return false.
+     *
+     * @return true if the device has an active connection and is a Flic Duo device, false otherwise
+     */
+    public boolean isDuo() {
+        Session s = Flic2Button.this.currentGattCb.getSession();
+        return (s != null && s.isEstablished() && s.isDuo);
+    }
+
+    /**
      * Gets a string representation.
      *
      * <p>Should only be used for debug purposes.</p>
