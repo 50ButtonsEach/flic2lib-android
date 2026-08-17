@@ -1499,6 +1499,7 @@ public class Flic2Button {
                         manager.database.updateBootIdAndEventCounter(Flic2Button.this);
                     }
                     if (!rsp.hasQueuedEvents) {
+                        hasProcessedEndOfQueueMarker = true;
                         afterInitialButtonEventsReceived();
                     }
                     readyTimestamp = rsp.timestamp;
