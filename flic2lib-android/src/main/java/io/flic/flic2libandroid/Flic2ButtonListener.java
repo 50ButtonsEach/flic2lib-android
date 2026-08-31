@@ -329,4 +329,34 @@ public class Flic2ButtonListener {
      */
     public void onDuoPushTwistNotification(FlicDuoPushTwistNotificationButtonInfo[] buttonInfo, int angleDiff) {
     }
+
+    /**
+     * Accelerometer streaming samples handler.
+     *
+     * <p>This event is emitted continuously when the accelerometer streaming feature has been activated,
+     * conditionally only while pressed according to the configuration (see {@link Flic2Button#enableAccelerometerStreaming(AccelerometerStreamingConfig, EnableAccelerometerStreamingCallback)}).</p>
+     *
+     * @param dataPoints An array of samples.
+     */
+    public void onAccelerometerStreamingData(AccelerometerDataPoint[] dataPoints) {
+    }
+
+    /**
+     * Fall detection event handler.
+     *
+     * <p>Triggered whenever a fall is detected. The {@link FallDetectionEvent#STATE_TRIGGERED} event will first be triggered for a specific fall,
+     * followed by the {@link FallDetectionEvent#STATE_PRE_FALL_DATA_COLLECTED} and {@link FallDetectionEvent#STATE_COMPLETED} events.</p>
+     *
+     * <p>The {@link FallDetectionEvent#getPreFallAccelerometerData()} will only be populated with a non-zero array once {@link FallDetectionEvent#STATE_PRE_FALL_DATA_COLLECTED} has been emitted.
+     * Similarly, {@link FallDetectionEvent#getPostFallAccelerometerData()} will only be populated with a non-zero array once {@link FallDetectionEvent#STATE_COMPLETED} has been emitted.</p>
+     *
+     * <p>If the Bluetooth connection drops, or the fall detection is disabled or restarted,
+     * it is possible that the subsequent {@link FallDetectionEvent#STATE_PRE_FALL_DATA_COLLECTED}
+     * and/or {@link FallDetectionEvent#STATE_COMPLETED} events might never arrive
+     * after the {@link FallDetectionEvent#STATE_TRIGGERED} has been emitted.</p>
+     *
+     * @param event An event that indicates the progress of the collection of data from the fall event.
+     */
+    public void onFallDetectionUpdated(FallDetectionEvent event) {
+    }
 }

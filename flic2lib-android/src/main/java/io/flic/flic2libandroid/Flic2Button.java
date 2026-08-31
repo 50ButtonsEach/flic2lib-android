@@ -1,11 +1,13 @@
 package io.flic.flic2libandroid;
 
+import android.annotation.SuppressLint;
 import android.bluetooth.BluetoothDevice;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.Arrays;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 
 import javax.crypto.Mac;
@@ -43,6 +45,11 @@ public class Flic2Button {
      */
     public static final int CONNECTION_STATE_CONNECTED_READY = 3;
 
+    private static final int ADV_SETTINGS_CONFIGURED_NO = 0;
+    private static final int ADV_SETTINGS_CONFIGURED_YES_NOT_PERSISTENTLY = 1;
+    private static final int ADV_SETTINGS_CONFIGURED_YES_WITHOUT_ALWAYS_RECONNECT = 2;
+    private static final int ADV_SETTINGS_CONFIGURED_YES_WITH_ALWAYS_RECONNECT = 3;
+
     private static void log(String s) {
         //Log.d("Flic2Button", s);
     }
@@ -69,7 +76,7 @@ public class Flic2Button {
     int firmwareVersion;
     long nextFirmwareCheckTimestamp;
     boolean unpaired;
-    boolean advSettingsConfigured;
+    int advSettingsConfigured;
     int bootId;
     int[] eventCount = new int[2];
     long readyTimestamp;
@@ -219,6 +226,20 @@ public class Flic2Button {
         public void onDuoPushTwistNotification(FlicDuoPushTwistNotificationButtonInfo[] buttonInfo, int angleDiff) {
             for (Flic2ButtonListener listener : listeners) {
                 listener.onDuoPushTwistNotification(buttonInfo, angleDiff);
+            }
+        }
+
+        @Override
+        public void onAccelerometerStreamingData(AccelerometerDataPoint[] dataPoints) {
+            for (Flic2ButtonListener listener : listeners) {
+                listener.onAccelerometerStreamingData(dataPoints);
+            }
+        }
+
+        @Override
+        public void onFallDetectionUpdated(FallDetectionEvent event) {
+            for (Flic2ButtonListener listener : listeners) {
+                listener.onFallDetectionUpdated(event);
             }
         }
     };
@@ -670,6 +691,193 @@ public class Flic2Button {
     }
 
     /**
+     * Plays a series of notes on Flic Duo's buzzer.
+     *
+     * <p>The button must be connected and ready. If a previous sequence is already in progress playing, that one will be aborted.</p>
+     *
+     * <p>Minimum firmware version: 20.</p>
+     *
+     * @param notes The maximum number of notes is 30.
+     * @throws IllegalArgumentException If the number of notes is more than 30.
+     */
+    public void playBuzzerSound(BuzzerNote[] notes) {
+        if (notes.length > 30) {
+            throw new IllegalArgumentException("Too many notes (" + notes.length + "), max: 30");
+        }
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        currentGattCb.getSession().playBuzzerSound(notes);
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Enables accelerometer streaming for Flic Duo.
+     *
+     * <p>Samples will be delivered through the {@link Flic2ButtonListener#onAccelerometerStreamingData(AccelerometerDataPoint[])} method.</p>
+     *
+     * <p>Minimum firmware version: 20.</p>
+     *
+     * @param config The configuration that the accelerometer will use.
+     * @param callback Called when the accelerometer streaming has been enabled in the Flic Duo or an error occurred.
+     *                 The callback might be executed as an inner call by this method.
+     *                 The callback may not execute if the link disconnects or another call to this or the disable method occurs before the callback has executed.
+     */
+    public void enableAccelerometerStreaming(AccelerometerStreamingConfig config, EnableAccelerometerStreamingCallback callback) {
+        EnableAccelerometerStreamingCallback cb = callback != null ? callback : new EnableAccelerometerStreamingCallback() {
+            @Override
+            public void onResult(int result) {
+            }
+        };
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        currentGattCb.getSession().configureAccelerometerStreaming(config, cb);
+                        return;
+                    }
+                }
+                cb.onResult(EnableAccelerometerStreamingCallback.NOT_READY);
+            }
+        });
+    }
+
+    /**
+     * Disables accelerometer streaming.
+     */
+    public void disableAccelerometerStreaming() {
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        currentGattCb.getSession().disableAccelerometerStreaming();
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Enables fall detection for Flic Duo.
+     *
+     * <p>Fall detection continuously monitors the built-in accelerometer for the pattern of a fall: a low-G event, indicating falling, followed by a high-G impact.</p>
+     *
+     * <p>When the configured conditions are met, an event is reported through {@link Flic2ButtonListener#onFallDetectionUpdated(FallDetectionEvent)}, where accelerometer data for the fall event is delivered.</p>
+     *
+     * <p>Fall detection is only kept active as long as the Flic is connected and the session is kept alive. The recommendation is to call this method at every {@link Flic2ButtonListener#onReady(Flic2Button, long)}.</p>
+     *
+     * <p>Minimum firmware version: 20.</p>
+     *
+     * <p>See <a href="https://github.com/50ButtonsEach/flic2-documentation/wiki/Fall-Detection-Documentation">the fall detection documentation page</a> for more information.</p>
+     *
+     * @param config The thresholds and timing used to detect a fall.
+     * @param alwaysReconnect If {@code true}, also enables always-reconnect advertising.
+     *                        This is recommended for fall detection because a fall can be detected without a button press, while a button press is normally the signal that causes the Duo to advertise and reconnect after a lost connection.
+     *                        When set to {@code true}, the implementation acts as if {@link #setAlwaysReconnect(boolean, SetAlwaysReconnectCallback)} is executed with an empty callback before the call to this method.
+     *                        If {@code false}, the always reconnect setting will not be touched.
+     * @param callback        Called when the fall detection has been enabled in the Flic Duo or an error occurred. The callback might be executed as an inner call by this method. The callback may not execute if the link disconnects or another call to this or the disable method occurs before the callback has executed.
+     */
+    public void enableFallDetection(FallDetectionConfig config, boolean alwaysReconnect, EnableFallDetectionCallback callback) {
+        EnableFallDetectionCallback cb = callback != null ? callback : new EnableFallDetectionCallback() {
+            @Override
+            public void onResult(int result) {
+            }
+        };
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        currentGattCb.getSession().enableFallDetection(config, alwaysReconnect, cb);
+                        return;
+                    }
+                }
+                cb.onResult(EnableFallDetectionCallback.NOT_READY);
+            }
+        });
+    }
+
+    /**
+     * Disables fall detection.
+     *
+     * @param disableAlwaysReconnect If {@code true}, disables always-reconnect advertising after disabling fall detection
+     *                               (the implementation acts as if {@link #setAlwaysReconnect(boolean, SetAlwaysReconnectCallback)}
+     *                               is executed after the call to this method).
+     *                               If {@code false}, this setting is not touched and the callback parameter is not used.
+     * @param callback               See {@link #setAlwaysReconnect(boolean, SetAlwaysReconnectCallback)}.
+     */
+    public void disableFallDetection(boolean disableAlwaysReconnect, SetAlwaysReconnectCallback callback) {
+        SetAlwaysReconnectCallback cb = callback != null ? callback : new SetAlwaysReconnectCallback() {
+            @Override
+            public void onResult(int result) {
+            }
+        };
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        currentGattCb.getSession().disableFallDetection(disableAlwaysReconnect, cb);
+                        return;
+                    }
+                }
+                if (disableAlwaysReconnect) {
+                    cb.onResult(SetAlwaysReconnectCallback.NOT_READY);
+                }
+            }
+        });
+    }
+
+    /**
+     * Sets whether the button should always reconnect when disconnected for Flic Duo.
+     *
+     * <p>If set to {@code true}, the button will always try to reconnect regardless if it has anything to report.
+     * This can be useful if you want to monitor battery levels even if the button is left unused for a long time but might have negative impact on battery performance.</p>
+     *
+     * <p>If set to {@code false} it typically only reconnects if pressed or lost connection.</p>
+     *
+     * <p>This setting is persisted on the Flic device.</p>
+     *
+     * <p>Minimum firmware version: 20.</p>
+     *
+     * @param alwaysReconnect See above.
+     * @param callback The callback might be executed as an inner call by this method.
+     *                 The callback may not execute if the link disconnects or another call to this method (or another method that acts as if this method was called) occurs before the callback has executed.
+     */
+    public void setAlwaysReconnect(boolean alwaysReconnect, SetAlwaysReconnectCallback callback) {
+        SetAlwaysReconnectCallback cb = callback != null ? callback : new SetAlwaysReconnectCallback() {
+            @Override
+            public void onResult(int result) {
+            }
+        };
+        manager.runOnHandlerThread(new Runnable() {
+            @Override
+            public void run() {
+                if (Flic2Button.this.isConnected) {
+                    Session s = Flic2Button.this.currentGattCb.getSession();
+                    if (s != null && s.isEstablished()) {
+                        currentGattCb.getSession().setAlwaysReconnect(alwaysReconnect, cb);
+                        return;
+                    }
+                }
+                cb.onResult(SetAlwaysReconnectCallback.NOT_READY);
+            }
+        });
+    }
+
+    /**
      * Exports the pairing key.
      *
      * <p>This is to be used in case a button pairing should be imported into Flic Hub SDK or Flic Device Manager.</p>
@@ -681,6 +889,15 @@ public class Flic2Button {
             return null;
         }
         return Utils.concatArrays(Utils.intToBytes(pairingData.identifier), pairingData.key);
+    }
+
+    /**
+     * Checks whether this device is a Flic Duo.
+     *
+     * @return {@code true} if it is a Flic Duo, otherwise {@code false}.
+     */
+    public boolean isFlicDuo() {
+        return serialNumber.startsWith("D");
     }
 
     /**
@@ -751,6 +968,9 @@ public class Flic2Button {
 
         private boolean gotInitialButtonEvents;
 
+        List<Integer> pendingAdvSettings = new LinkedList<>();
+        SetAlwaysReconnectCallback pendingAlwaysReconnectCallback;
+
         private boolean nameRequestPending;
         private boolean shouldResendNameRequest;
 
@@ -764,6 +984,15 @@ public class Flic2Button {
         byte[] appCredential;
 
         int[] twistPosition = new int[2];
+
+        int accelerometerStreamingNumPendingRequests;
+        EnableAccelerometerStreamingCallback enableAccelerometerStreamingCallback;
+        byte accelerometerStreamingScale;
+
+        int fallDetectionNumPendingRequests;
+        EnableFallDetectionCallback enableFallDetectionCallback;
+        FallDetectionCollector fallDetectionCollector;
+        byte fallDetectionScale;
 
         Session(boolean onL2CAP, SessionCallback sessionCallback) {
             this.onL2CAP = onL2CAP;
@@ -915,17 +1144,24 @@ public class Flic2Button {
             sendSignedPacket(ind);
         }
 
+        private void sendAdvSettings(boolean alwaysReconnect) {
+            TxPacket.SetAdvParametersRequest req = new TxPacket.SetAdvParametersRequest();
+            req.isActive = true;
+            req.removeOtherPairingsAdvSettings = false;
+            req.advInterval0 = 64;
+            req.advInterval1 = 1636;
+            req.timeoutSeconds = 86400;
+            req.withShortRange = true;
+            req.withLongRange = false;
+            req.alwaysReconnect = alwaysReconnect;
+            sendSignedRequest(req);
+            pendingAdvSettings.add(firmwareVersion < 19 ? ADV_SETTINGS_CONFIGURED_YES_NOT_PERSISTENTLY :
+                    alwaysReconnect ? ADV_SETTINGS_CONFIGURED_YES_WITH_ALWAYS_RECONNECT : ADV_SETTINGS_CONFIGURED_YES_WITHOUT_ALWAYS_RECONNECT);
+        }
+
         private void sendAdvSettingsIfNeeded() {
-            if (firmwareVersion >= 6 && !advSettingsConfigured) {
-                TxPacket.SetAdvParametersRequest req = new TxPacket.SetAdvParametersRequest();
-                req.isActive = true;
-                req.removeOtherPairingsAdvSettings = false;
-                req.advInterval0 = 64;
-                req.advInterval1 = 1636;
-                req.timeoutSeconds = 86400;
-                req.withShortRange = true;
-                req.withLongRange = false;
-                sendSignedRequest(req);
+            if (firmwareVersion >= 6 && advSettingsConfigured == ADV_SETTINGS_CONFIGURED_NO && pendingAdvSettings.isEmpty()) {
+                sendAdvSettings(false);
             }
         }
 
@@ -1103,6 +1339,141 @@ public class Flic2Button {
             }, 3 * 60 * 60 * 1000);
         }
 
+        private void playBuzzerSound(BuzzerNote[] notes) {
+            if (!isDuo || firmwareVersion < 20) {
+                return;
+            }
+            TxPacket.PlayBuzzerSoundRequestItem[] items = new TxPacket.PlayBuzzerSoundRequestItem[notes.length];
+            for (int i = 0; i < notes.length; i++) {
+                float hz = notes[i].getHz();
+                int halfPeriodLen = 0;
+                if (hz > 0) {
+                    float halfPeriodLenFloat = 500000.0f / hz;
+                    if (halfPeriodLenFloat > 65535.0f) {
+                        halfPeriodLenFloat = 65535.0f;
+                    }
+                    halfPeriodLen = Math.round(halfPeriodLenFloat);
+                }
+                items[i] = new TxPacket.PlayBuzzerSoundRequestItem(halfPeriodLen, notes[i].getDuration());
+            }
+            sendSignedRequest(new TxPacket.PlayBuzzerSoundRequest(items));
+        }
+
+        private void configureAccelerometerStreaming(AccelerometerStreamingConfig config, EnableAccelerometerStreamingCallback callback) {
+            if (!isDuo) {
+                callback.onResult(EnableAccelerometerStreamingCallback.NOT_SUPPORTED);
+                return;
+            }
+            if (firmwareVersion < 20) {
+                callback.onResult(EnableAccelerometerStreamingCallback.FIRMWARE_UPDATE_NEEDED);
+                return;
+            }
+            TxPacket.ConfigureAccelerometerStreamingRequest r = new TxPacket.ConfigureAccelerometerStreamingRequest();
+            r.lowPowerMode = (byte)config.lowPowerMode;
+            r.mode = (byte)config.mode;
+            r.outputDataRate = (byte)config.outputDataRate;
+            r.bandwidthFilter = (byte)config.bandwidthFilter;
+            r.fullScaleSelection = (byte)config.fullScaleSelection;
+            r.filterDatatypeSelection = (byte)config.filterDatatypeSelection;
+            r.lowNoise = config.lowNoise;
+            r.highPassRefMode = config.highPassRefMode;
+            r.onlyWhilePressed = config.onlyWhilePressed;
+            r.samplesPerBurst = (byte)config.samplesPerBurst;
+            sendSignedRequest(r);
+            ++accelerometerStreamingNumPendingRequests;
+            enableAccelerometerStreamingCallback = callback;
+            accelerometerStreamingScale = (byte)config.fullScaleSelection;
+        }
+
+        private void disableAccelerometerStreaming() {
+            if (isDuo && firmwareVersion >= 20) {
+                sendSignedRequest(new TxPacket.DisableAccelerometerStreamingRequest());
+                ++accelerometerStreamingNumPendingRequests;
+            }
+        }
+
+        private void enableFallDetection(FallDetectionConfig config, boolean alwaysReconnect, EnableFallDetectionCallback callback) {
+            if (!isDuo) {
+                callback.onResult(EnableFallDetectionCallback.NOT_SUPPORTED);
+                return;
+            }
+            if (firmwareVersion < 20) {
+                callback.onResult(EnableFallDetectionCallback.FIRMWARE_UPDATE_NEEDED);
+                return;
+            }
+            if (alwaysReconnect) {
+                boolean correctNow = advSettingsConfigured == ADV_SETTINGS_CONFIGURED_YES_WITH_ALWAYS_RECONNECT;
+                boolean correctLastInQueue = !pendingAdvSettings.isEmpty() && pendingAdvSettings.get(pendingAdvSettings.size() - 1) == ADV_SETTINGS_CONFIGURED_YES_WITH_ALWAYS_RECONNECT;
+                if ((pendingAdvSettings.isEmpty() && !correctNow) || (!pendingAdvSettings.isEmpty() && !correctLastInQueue)) {
+                    sendAdvSettings(true);
+                }
+                pendingAlwaysReconnectCallback = null;
+            }
+            TxPacket.ConfigureFallDetectionRequest r = new TxPacket.ConfigureFallDetectionRequest(
+                    (short)config.lowGThresholdMg,
+                    (short)config.lowGDurationMs,
+                    (short)config.highGTimeoutMs,
+                    (short)config.highGThresholdMg,
+                    (short)config.highGTimeWindowMs,
+                    (short)config.postEventRecordDurationMs,
+                    (byte)config.fullScaleSelection);
+            sendSignedRequest(r);
+            ++fallDetectionNumPendingRequests;
+            enableFallDetectionCallback = callback;
+            fallDetectionScale = (byte)config.fullScaleSelection;
+        }
+
+        private void disableFallDetection(boolean disableAlwaysReconnect, SetAlwaysReconnectCallback callback) {
+            if (isDuo && firmwareVersion >= 20) {
+                sendSignedRequest(new TxPacket.CancelFallDetectionRequest());
+                ++fallDetectionNumPendingRequests;
+            }
+            if (disableAlwaysReconnect) {
+                setAlwaysReconnect(false, callback);
+            }
+        }
+
+        private void sendFallDetectionUpdatesIfNeeded() {
+            if (fallDetectionCollector == null) {
+                return;
+            }
+
+            boolean preFallComplete = fallDetectionCollector.numSamplesReceived >= fallDetectionCollector.phase0NumSamples;
+            boolean postFallComplete = fallDetectionCollector.numSamplesReceived >= fallDetectionCollector.phase0NumSamples + fallDetectionCollector.phase1NumSamples;
+
+            if (preFallComplete && !fallDetectionCollector.didSendPreFallDataCollected) {
+                fallDetectionCollector.didSendPreFallDataCollected = true;
+                listener.onFallDetectionUpdated(fallDetectionCollector.getEvent(FallDetectionEvent.STATE_PRE_FALL_DATA_COLLECTED));
+            }
+
+            if (postFallComplete && fallDetectionCollector != null) {
+                listener.onFallDetectionUpdated(fallDetectionCollector.getEvent(FallDetectionEvent.STATE_COMPLETED));
+                fallDetectionCollector = null;
+            }
+        }
+
+        private void setAlwaysReconnect(boolean alwaysReconnect, SetAlwaysReconnectCallback callback) {
+            if (!isDuo) {
+                callback.onResult(SetAlwaysReconnectCallback.NOT_SUPPORTED);
+                return;
+            }
+            if (firmwareVersion < 20) {
+                callback.onResult(SetAlwaysReconnectCallback.FIRMWARE_UPDATE_NEEDED);
+                return;
+            }
+            int target = alwaysReconnect ? ADV_SETTINGS_CONFIGURED_YES_WITH_ALWAYS_RECONNECT : ADV_SETTINGS_CONFIGURED_YES_WITHOUT_ALWAYS_RECONNECT;
+            boolean correctNow = advSettingsConfigured == target;
+            boolean correctLastInQueue = !pendingAdvSettings.isEmpty() && pendingAdvSettings.get(pendingAdvSettings.size() - 1) == target;
+            if ((pendingAdvSettings.isEmpty() && !correctNow) || (!pendingAdvSettings.isEmpty() && !correctLastInQueue)) {
+                sendAdvSettings(alwaysReconnect);
+                pendingAlwaysReconnectCallback = callback;
+            } else if (pendingAdvSettings.isEmpty()) {
+                callback.onResult(SetAlwaysReconnectCallback.SUCCESS);
+            } else {
+                pendingAlwaysReconnectCallback = callback;
+            }
+        }
+
         private void firmwareUpdateContinue() {
             if (!isDuo) {
                 while (firmwareUpdateSentPos < firmwareUpdateData.length / 4 && firmwareUpdateSentPos - firmwareUpdateAckPos < 512) {
@@ -1175,7 +1546,7 @@ public class Flic2Button {
             }
         }
 
-        @SuppressWarnings("MissingPermission")
+        @SuppressLint("MissingPermission")
         public void onData(byte[] value) {
             try {
                 int packetConnId;
@@ -1491,7 +1862,9 @@ public class Flic2Button {
                     if (eventCountChanged && !bootIdChanged) {
                         manager.database.updateEventCounter(Flic2Button.this);
                     } else if (bootIdChanged) {
-                        Flic2Button.this.advSettingsConfigured = false;
+                        if (Flic2Button.this.advSettingsConfigured == ADV_SETTINGS_CONFIGURED_YES_NOT_PERSISTENTLY) {
+                            Flic2Button.this.advSettingsConfigured = ADV_SETTINGS_CONFIGURED_NO;
+                        }
                         if (useQuickVerify) {
                             Flic2Button.this.lastKnownBatteryVoltage = null;
                             Flic2Button.this.lastKnownBatteryTimestampUtcMs = null;
@@ -1875,8 +2248,15 @@ public class Flic2Button {
 
                 if (opcode == RxPacket.SET_ADV_PARAMETERS_RESPONSE) {
                     responseReceived();
-                    advSettingsConfigured = true;
+                    advSettingsConfigured = pendingAdvSettings.remove(0);
                     manager.database.updateAdvSettingsConfigured(Flic2Button.this);
+                    if (pendingAdvSettings.isEmpty()) {
+                        SetAlwaysReconnectCallback cb = pendingAlwaysReconnectCallback;
+                        if (cb != null) {
+                            pendingAlwaysReconnectCallback = null;
+                            cb.onResult(SetAlwaysReconnectCallback.SUCCESS);
+                        }
+                    }
                     return;
                 }
 
@@ -1913,6 +2293,85 @@ public class Flic2Button {
                         getHidMidiBuffer = null;
                         callback.onResult(rsp.result, rsp.result == 0 ? data : null);
                     }
+                    return;
+                }
+
+                if (opcode == RxPacket.CONFIGURE_ACCELEROMETER_STREAMING_RESPONSE && pkt.length >= 1) {
+                    --accelerometerStreamingNumPendingRequests;
+                    responseReceived();
+                    if (accelerometerStreamingNumPendingRequests == 0) {
+                        RxPacket.ConfigureAccelerometerStreamingResponse rsp = new RxPacket.ConfigureAccelerometerStreamingResponse(pkt);
+                        EnableAccelerometerStreamingCallback callback = enableAccelerometerStreamingCallback;
+                        enableAccelerometerStreamingCallback = null;
+                        callback.onResult(rsp.result);
+                    }
+                    return;
+                }
+
+                if (opcode == RxPacket.DISABLE_ACCELEROMETER_STREAMING_RESPONSE) {
+                    --accelerometerStreamingNumPendingRequests;
+                    responseReceived();
+                    return;
+                }
+
+                if (opcode == RxPacket.ACCELEROMETER_STREAMING_NOTIFICATION) {
+                    if (accelerometerStreamingNumPendingRequests == 0) {
+                        RxPacket.AccelerometerStreamingNotification notification = new RxPacket.AccelerometerStreamingNotification(pkt);
+                        AccelerometerDataPoint[] array = new AccelerometerDataPoint[notification.samples.length / 3];
+                        for (int i = 0; i < array.length; i++) {
+                            array[i] = new AccelerometerDataPoint(notification.samples[3 * i], notification.samples[3 * i + 1], notification.samples[3 * i + 2], accelerometerStreamingScale);
+                        }
+                        listener.onAccelerometerStreamingData(array);
+                    }
+                    return;
+                }
+
+                if (opcode == RxPacket.PLAY_BUZZER_SOUND_RESPONSE) {
+                    responseReceived();
+                    return;
+                }
+
+                if (opcode == RxPacket.CONFIGURE_FALL_DETECTION_RESPONSE && pkt.length >= 1) {
+                    --fallDetectionNumPendingRequests;
+                    responseReceived();
+                    RxPacket.ConfigureFallDetectionResponse rsp = new RxPacket.ConfigureFallDetectionResponse(pkt);
+                    if (fallDetectionNumPendingRequests == 0) {
+                        EnableFallDetectionCallback callback = enableFallDetectionCallback;
+                        enableFallDetectionCallback = null;
+                        callback.onResult(rsp.result);
+                    }
+                    return;
+                }
+
+                if (opcode == RxPacket.FALL_DETECTION_TRIGGERED_NOTIFICATION && pkt.length >= 8) {
+                    RxPacket.FallDetectionTriggeredNotification notification = new RxPacket.FallDetectionTriggeredNotification(pkt);
+                    if (fallDetectionNumPendingRequests == 0) {
+                        FallDetectionCollector collector = new FallDetectionCollector();
+                        collector.phase0SampleRate = notification.phase0SampleRate;
+                        collector.phase0NumSamples = notification.phase0NumSamples;
+                        collector.phase1SampleRate = notification.phase1SampleRate;
+                        collector.phase1NumSamples = notification.phase1NumSamples;
+                        collector.samples = new AccelerometerDataPoint[notification.phase0NumSamples + notification.phase1NumSamples];
+                        collector.addSamples(notification.samples, fallDetectionScale);
+                        fallDetectionCollector = collector;
+                        listener.onFallDetectionUpdated(collector.getEvent(FallDetectionEvent.STATE_TRIGGERED));
+                        sendFallDetectionUpdatesIfNeeded();
+                    }
+                    return;
+                }
+
+                if (opcode == RxPacket.FALL_DETECTION_SAMPLES_NOTIFICATION) {
+                    RxPacket.FallDetectionSamplesNotification notification = new RxPacket.FallDetectionSamplesNotification(pkt);
+                    if (fallDetectionNumPendingRequests == 0 && fallDetectionCollector != null) {
+                        fallDetectionCollector.addSamples(notification.samples, fallDetectionScale);
+                        sendFallDetectionUpdatesIfNeeded();
+                    }
+                    return;
+                }
+
+                if (opcode == RxPacket.CANCEL_FALL_DETECTION_RESPONSE) {
+                    --fallDetectionNumPendingRequests;
+                    responseReceived();
                     return;
                 }
             } catch (RxPacket.UnexpectedEndOfPacketException ex) {

@@ -1,6 +1,6 @@
 ![Flic Logo Black](https://user-images.githubusercontent.com/2717016/70526105-1bbaa200-1b49-11ea-9aa0-49e7959300c3.png)
 
-[![javadoc](https://img.shields.io/badge/javadoc-2.0.1-brightgreen.svg)](https://javadoc.jitpack.io/com/github/50ButtonsEach/flic2lib-android/2dab0989dc8aba76a47006c4673f415d43bc445e/javadoc/)
+[![javadoc](https://img.shields.io/badge/javadoc-2.1.0-brightgreen.svg)](https://javadoc.jitpack.io/com/github/50ButtonsEach/flic2lib-android/2.1.0/javadoc/)
 
 # Flic2 lib for Android
 
@@ -29,7 +29,7 @@ See [License.txt](License.txt).
 
 # API documentation
 
-See [![javadoc](https://img.shields.io/badge/javadoc-2.0.1-brightgreen.svg)](https://javadoc.jitpack.io/com/github/50ButtonsEach/flic2lib-android/2dab0989dc8aba76a47006c4673f415d43bc445e/javadoc).
+See [![javadoc](https://img.shields.io/badge/javadoc-2.1.0-brightgreen.svg)](https://javadoc.jitpack.io/com/github/50ButtonsEach/flic2lib-android/2.1.0/javadoc).
 
 # Tutorial
 

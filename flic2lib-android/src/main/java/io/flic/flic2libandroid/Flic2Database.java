@@ -86,7 +86,7 @@ class Flic2Database extends SQLiteOpenHelper {
         ContentValues values = new ContentValues();
         values.put("boot_id", button.bootId);
         values.put("event_counter", (button.eventCount[0] & 0xffffffffL) | ((long)button.eventCount[1] << 32));
-        values.put("adv_settings_configured", button.advSettingsConfigured ? 1 : 0);
+        values.put("adv_settings_configured", button.advSettingsConfigured);
         values.put("last_known_battery_voltage", button.lastKnownBatteryVoltage);
         values.put("last_known_battery_timestamp_utc_ms", button.lastKnownBatteryTimestampUtcMs);
 
@@ -102,7 +102,7 @@ class Flic2Database extends SQLiteOpenHelper {
 
     public void updateAdvSettingsConfigured(Flic2Button button) {
         ContentValues values = new ContentValues();
-        values.put("adv_settings_configured", button.advSettingsConfigured ? 1 : 0);
+        values.put("adv_settings_configured", button.advSettingsConfigured);
 
         update(button, values);
     }
@@ -159,7 +159,7 @@ class Flic2Database extends SQLiteOpenHelper {
                 long eventCounts = query.getLong(query.getColumnIndex("event_counter"));
                 button.eventCount[0] = (int)eventCounts;
                 button.eventCount[1] = (int)(eventCounts >> 32);
-                button.advSettingsConfigured = query.getInt(query.getColumnIndex("adv_settings_configured")) != 0;
+                button.advSettingsConfigured = query.getInt(query.getColumnIndex("adv_settings_configured"));
                 button.lastKnownBatteryVoltage = query.isNull(query.getColumnIndex("last_known_battery_voltage")) ? null : query.getFloat(query.getColumnIndex("last_known_battery_voltage"));
                 button.lastKnownBatteryTimestampUtcMs = query.isNull(query.getColumnIndex("last_known_battery_timestamp_utc_ms")) ? null : query.getLong(query.getColumnIndex("last_known_battery_timestamp_utc_ms"));
                 buttons.add(button);

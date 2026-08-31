@@ -42,6 +42,12 @@ abstract class TxPacket {
     public static final int START_FIRMWARE_UPDATE_DUO_REQUEST = 38;
     public static final int FIRMWARE_UPDATE_DATA_DUO_IND = 39;
 
+    public static final int CONFIGURE_ACCELEROMETER_STREAMING_REQUEST = 41;
+    public static final int DISABLE_ACCELEROMETER_STREAMING_REQUEST = 42;
+    public static final int PLAY_BUZZER_SOUND_REQUEST = 43;
+    public static final int CONFIGURE_FALL_DETECTION_REQUEST = 44;
+    public static final int CANCEL_FALL_DETECTION_REQUEST = 45;
+
 
     protected abstract void write(Writer w);
 
@@ -463,6 +469,7 @@ abstract class TxPacket {
         short advInterval0;
         short advInterval1;
         int timeoutSeconds;
+        boolean alwaysReconnect;
 
         @Override
         protected void write(Writer w) {
@@ -474,6 +481,7 @@ abstract class TxPacket {
             w.s(advInterval0);
             w.s(advInterval1);
             w.i(timeoutSeconds);
+            w.bool(alwaysReconnect);
         }
     }
 
@@ -549,6 +557,112 @@ abstract class TxPacket {
             w.bitBool(buttons[1]);
         }
     }
+
+    static class PlayBuzzerSoundRequestItem {
+        int halfPeriodLen;
+        int duration;
+
+        public PlayBuzzerSoundRequestItem(int halfPeriodLen, int duration) {
+            this.halfPeriodLen = halfPeriodLen;
+            this.duration = duration;
+        }
+    }
+
+    static class PlayBuzzerSoundRequest extends TxPacket {
+        PlayBuzzerSoundRequestItem[] items;
+
+        public PlayBuzzerSoundRequest(PlayBuzzerSoundRequestItem[] items) {
+            this.items = items;
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(PLAY_BUZZER_SOUND_REQUEST);
+            for (PlayBuzzerSoundRequestItem item : items) {
+                w.s(item.halfPeriodLen);
+                w.s(item.duration);
+            }
+        }
+    }
+
+    static class ConfigureAccelerometerStreamingRequest extends TxPacket {
+        byte lowPowerMode;
+        byte mode;
+        byte outputDataRate;
+        byte bandwidthFilter;
+        byte fullScaleSelection;
+        byte filterDatatypeSelection;
+        boolean lowNoise;
+        boolean highPassRefMode;
+        boolean onlyWhilePressed;
+        byte samplesPerBurst;
+
+        public ConfigureAccelerometerStreamingRequest() {
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(CONFIGURE_ACCELEROMETER_STREAMING_REQUEST);
+            w.bits(lowPowerMode, 2);
+            w.bits(mode, 2);
+            w.bits(outputDataRate, 4);
+            w.bits(bandwidthFilter, 2);
+            w.bits(fullScaleSelection, 2);
+            w.bits(filterDatatypeSelection, 1);
+            w.bitBool(lowNoise);
+            w.bitBool(highPassRefMode);
+            w.bitBool(onlyWhilePressed);
+            w.bits(samplesPerBurst, 6);
+            w.bitsPadding(2);
+        }
+    }
+
+    static class DisableAccelerometerStreamingRequest extends TxPacket {
+        @Override
+        protected void write(Writer w) {
+            w.opcode(DISABLE_ACCELEROMETER_STREAMING_REQUEST);
+        }
+    }
+
+    static class ConfigureFallDetectionRequest extends TxPacket {
+        short lowGThresholdMg;
+        short lowGDurationMs;
+        short highGTimeoutMs;
+        short highGThresholdMg;
+        short highGTimeWindowMs;
+        short postEventRecordDurationMs;
+        byte fullScaleSelection;
+
+        public ConfigureFallDetectionRequest(short lowGThresholdMg, short lowGDurationMs, short highGTimeoutMs, short highGThresholdMg, short highGTimeWindowMs, short postEventRecordDurationMs, byte fullScaleSelection) {
+            this.lowGThresholdMg = lowGThresholdMg;
+            this.lowGDurationMs = lowGDurationMs;
+            this.highGTimeoutMs = highGTimeoutMs;
+            this.highGThresholdMg = highGThresholdMg;
+            this.highGTimeWindowMs = highGTimeWindowMs;
+            this.postEventRecordDurationMs = postEventRecordDurationMs;
+            this.fullScaleSelection = fullScaleSelection;
+        }
+
+        @Override
+        protected void write(Writer w) {
+            w.opcode(CONFIGURE_FALL_DETECTION_REQUEST);
+            w.s(lowGThresholdMg);
+            w.s(lowGDurationMs);
+            w.s(highGTimeoutMs);
+            w.s(highGThresholdMg);
+            w.s(highGTimeWindowMs);
+            w.s(postEventRecordDurationMs);
+            w.bits(fullScaleSelection, 2);
+            w.bitsPadding(6);
+        }
+    }
+
+    static class CancelFallDetectionRequest extends TxPacket {
+        @Override
+        protected void write(Writer w) {
+            w.opcode(CANCEL_FALL_DETECTION_REQUEST);
+        }
+    }
 }
 
 abstract class RxPacket {
@@ -585,6 +699,15 @@ abstract class RxPacket {
     public static final int INIT_BUTTON_EVENTS_DUO_RESPONSE_WITHOUT_BOOT_ID = 31;
     public static final int BUTTON_EVENT_DUO_NOTIFICATION = 32;
     public static final int PUSH_TWIST_DATA_NOTIFICATION = 33;
+
+    public static final int CONFIGURE_ACCELEROMETER_STREAMING_RESPONSE = 35;
+    public static final int DISABLE_ACCELEROMETER_STREAMING_RESPONSE = 36;
+    public static final int ACCELEROMETER_STREAMING_NOTIFICATION = 37;
+    public static final int PLAY_BUZZER_SOUND_RESPONSE = 38;
+    public static final int CONFIGURE_FALL_DETECTION_RESPONSE = 39;
+    public static final int FALL_DETECTION_TRIGGERED_NOTIFICATION = 40;
+    public static final int FALL_DETECTION_SAMPLES_NOTIFICATION = 41;
+    public static final int CANCEL_FALL_DETECTION_RESPONSE = 42;
 
     static class UnexpectedEndOfPacketException extends Exception {
     }
@@ -970,6 +1093,71 @@ abstract class RxPacket {
             buttonsPressedForAtLeastHalfASecond = new boolean[] {r.bitBool(), r.bitBool()};
             r.bitsPadding(2);
             angleDiff = r.i();
+        }
+    }
+
+    static class ConfigureAccelerometerStreamingResponse extends RxPacket {
+        int result;
+
+        public ConfigureAccelerometerStreamingResponse(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            result = r.b();
+        }
+    }
+
+    static class AccelerometerStreamingNotification extends RxPacket {
+        short[] samples;
+
+        public AccelerometerStreamingNotification(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            int numSamplesInPacket = arr.length / 6;
+            samples = new short[numSamplesInPacket * 3];
+            for (int i = 0; i < numSamplesInPacket * 3; i++) {
+                samples[i] = (short)r.s();
+            }
+        }
+    }
+
+    static class ConfigureFallDetectionResponse extends RxPacket {
+        int result;
+
+        public ConfigureFallDetectionResponse(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            result = r.b();
+        }
+    }
+
+    static class FallDetectionTriggeredNotification extends RxPacket {
+        int phase0SampleRate;
+        int phase0NumSamples;
+        int phase1SampleRate;
+        int phase1NumSamples;
+        short[] samples;
+
+        public FallDetectionTriggeredNotification(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            phase0SampleRate = r.s();
+            phase0NumSamples = r.s();
+            phase1SampleRate = r.s();
+            phase1NumSamples = r.s();
+            int numSamplesInPacket = (arr.length - 4 * 2) / 6;
+            samples = new short[numSamplesInPacket * 3];
+            for (int i = 0; i < numSamplesInPacket * 3; i++) {
+                samples[i] = (short)r.s();
+            }
+        }
+    }
+
+    static class FallDetectionSamplesNotification extends RxPacket {
+        short[] samples;
+
+        public FallDetectionSamplesNotification(byte[] arr) throws UnexpectedEndOfPacketException {
+            super(arr);
+            int numSamplesInPacket = arr.length / 6;
+            samples = new short[numSamplesInPacket * 3];
+            for (int i = 0; i < numSamplesInPacket * 3; i++) {
+                samples[i] = (short)r.s();
+            }
         }
     }
 }
