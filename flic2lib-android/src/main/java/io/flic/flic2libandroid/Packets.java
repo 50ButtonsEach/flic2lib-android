@@ -594,8 +594,8 @@ abstract class TxPacket {
         byte filterDatatypeSelection;
         boolean lowNoise;
         boolean highPassRefMode;
-        boolean onlyWhilePressed;
         byte samplesPerBurst;
+        boolean onlyWhilePressed;
 
         public ConfigureAccelerometerStreamingRequest() {
         }
@@ -611,8 +611,8 @@ abstract class TxPacket {
             w.bits(filterDatatypeSelection, 1);
             w.bitBool(lowNoise);
             w.bitBool(highPassRefMode);
-            w.bitBool(onlyWhilePressed);
             w.bits(samplesPerBurst, 6);
+            w.bitBool(onlyWhilePressed);
             w.bitsPadding(2);
         }
     }

@@ -1377,8 +1377,8 @@ public class Flic2Button {
             r.filterDatatypeSelection = (byte)config.filterDatatypeSelection;
             r.lowNoise = config.lowNoise;
             r.highPassRefMode = config.highPassRefMode;
-            r.onlyWhilePressed = config.onlyWhilePressed;
             r.samplesPerBurst = (byte)config.samplesPerBurst;
+            r.onlyWhilePressed = config.onlyWhilePressed;
             sendSignedRequest(r);
             ++accelerometerStreamingNumPendingRequests;
             enableAccelerometerStreamingCallback = callback;
